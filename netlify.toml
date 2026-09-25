@@ -6,3 +6,7 @@
 
 [build.environment]
   NODE_VERSION = "20"
+
+# Netlify's Next.js adapter. Declared explicitly: without it Netlify serves nothing and every page is a 404.
+[[plugins]]
+  package = "@netlify/plugin-nextjs"

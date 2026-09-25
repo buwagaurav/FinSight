@@ -17,6 +17,7 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@netlify/plugin-nextjs": "^5.16.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

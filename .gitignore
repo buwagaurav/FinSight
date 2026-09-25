@@ -18,3 +18,5 @@ web/.next/
 # Editors / OS
 .idea/
 .DS_Store
+.netlify/
+web/.netlify/
