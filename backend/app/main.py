@@ -32,6 +32,29 @@ def health():
     return {"ok": True}
 
 
+@app.get("/api/health/sources")
+def health_sources():
+    """Which external data sources this server can reach (cloud hosts are sometimes blocked)."""
+    import time as _t
+    from app.providers import investorgain
+
+    def check(fn):
+        started = _t.time()
+        try:
+            fn()
+            return {"ok": True, "ms": round((_t.time() - started) * 1000)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:200]}
+
+    return {
+        "yahoo_quote": check(lambda: yahoo.profile.__wrapped__("RELIANCE.NS")),
+        "yahoo_prices": check(lambda: yahoo.price_history.__wrapped__("RELIANCE.NS", "1mo") or (_ for _ in ()).throw(ValueError("empty"))),
+        "nse": check(lambda: nse.current_ipos.__wrapped__()),
+        "investorgain": check(lambda: investorgain.live_list.__wrapped__()),
+        "database": check(lambda: screener.coverage()),
+    }
+
+
 _loader_stop = threading.Event()
 
 
