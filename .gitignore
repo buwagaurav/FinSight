@@ -1,0 +1,20 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Local data: embedded PostgreSQL, caches, generated outputs (all regenerable)
+backend/data/
+backend/eval/results/
+
+# Secrets: API keys live here; see backend/.env.example
+backend/.env
+.env
+
+# Web
+web/node_modules/
+web/.next/
+
+# Editors / OS
+.idea/
+.DS_Store
