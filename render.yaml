@@ -1,0 +1,26 @@
+# Render Blueprint: the FinSight API (free web service). New > Blueprint > pick this repo.
+services:
+  - type: web
+    name: finsight-api
+    runtime: python
+    plan: free
+    region: singapore
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      # The nightly GitHub Actions job keeps the database fresh; a sleeping free instance can't.
+      - key: FINSIGHT_BACKGROUND_LOADER
+        value: "0"
+      - key: FINSIGHT_MODEL
+        value: deepseek:deepseek-flash
+      # Set these in the Render dashboard (never commit them):
+      - key: DATABASE_URL          # Neon connection string
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: FINSIGHT_CORS_ORIGINS # your Netlify site, e.g. https://finsight.netlify.app
+        sync: false

@@ -16,7 +16,20 @@ from app.ai import assistant, filings, llm, report, screen_nl
 from app.providers import nse, yahoo
 
 app = FastAPI(title="FinSight API", version="0.1.0")
-app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000"], allow_methods=["*"], allow_headers=["*"])
+# Websites allowed to call this API: comma-separated FINSIGHT_CORS_ORIGINS, e.g. "https://finsight.netlify.app".
+# FINSIGHT_CORS_ORIGIN_REGEX can also allow Netlify deploy previews, e.g. "https://.*--finsight\.netlify\.app".
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", *filter(None, os.environ.get("FINSIGHT_CORS_ORIGINS", "").split(","))],
+    allow_origin_regex=os.environ.get("FINSIGHT_CORS_ORIGIN_REGEX") or None,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/api/health")
+def health():
+    return {"ok": True}
 
 
 _loader_stop = threading.Event()

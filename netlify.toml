@@ -1,0 +1,8 @@
+# Netlify: the FinSight website. Set NEXT_PUBLIC_API_URL (your Render API URL) in Site configuration > Environment variables.
+[build]
+  base = "web"
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"

@@ -157,8 +157,12 @@ export type ScreenResult = {
   rows: ScreenRow[];
 };
 
+// Deployed: the site calls the API directly (NEXT_PUBLIC_API_URL, e.g. https://finsight-api.onrender.com).
+// Local dev: unset, so "/api/..." goes through the Next.js rewrite to localhost:8010.
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "");
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, { ...init, headers: { "content-type": "application/json", ...init?.headers } });
+  const res = await fetch(API_BASE + path, { ...init, headers: { "content-type": "application/json", ...init?.headers } });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.detail ?? `Request failed (${res.status})`);
