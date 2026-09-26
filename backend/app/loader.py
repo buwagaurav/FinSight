@@ -64,7 +64,7 @@ def claim(limit: int) -> list[dict]:
             SELECT symbol FROM load_status
             WHERE next_try_at <= now()
               AND (state IN ('pending', 'error')
-                   OR (state = 'ok' AND (profile_at < now() - interval '{PROFILE_MAX_AGE}'
+                   OR (state = 'ok' AND (profile_at IS NULL OR profile_at < now() - interval '{PROFILE_MAX_AGE}'
                                          OR statements_at < now() - interval '{STATEMENTS_MAX_AGE}')))
             ORDER BY (state = 'pending') DESC, profile_at NULLS FIRST
             LIMIT %s
@@ -74,10 +74,19 @@ def claim(limit: int) -> list[dict]:
         (limit,))
 
 
+def _merge_profile(symbol: str, fresh: dict) -> dict:
+    """Yahoo sometimes answers cloud servers with partial data (price but no market cap). Keep the last known value
+    for any field that comes back empty instead of overwriting good data with blanks."""
+    row = db.fetch_one("SELECT data FROM profiles WHERE symbol = %s", (symbol,))
+    if not row:
+        return fresh
+    return {**row["data"], **{k: v for k, v in fresh.items() if v is not None}}
+
+
 def load_one(symbol: str, need_statements: bool) -> str:
     ysym = f"{symbol}.NS"
     try:
-        profile = yahoo.profile(ysym)
+        profile = _merge_profile(symbol, yahoo.profile(ysym))
         if need_statements:
             statements = yahoo.annual_statements(ysym)
         else:

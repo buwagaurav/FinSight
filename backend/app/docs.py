@@ -96,7 +96,7 @@ def index_pdf(symbol: str, kind: str, title: str, url: str, published: str | Non
     _ensure_schema()
     if db.fetch_one("SELECT 1 FROM documents WHERE url = %s", (url,)):
         return 0
-    reader = PdfReader(io.BytesIO(_download(url, max_bytes)))
+    reader = PdfReader(io.BytesIO(_download(url, max_bytes)), strict=False)  # many filed PDFs are slightly malformed
     pages = []
     for p in reader.pages:
         try:
