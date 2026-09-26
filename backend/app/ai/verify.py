@@ -161,3 +161,104 @@ def misattributed(answer: str, tool_outputs: list[str]) -> list[str]:
                 if not derived:
                     problems.append(f"{m.group(0).strip()} {label}")
     return list(dict.fromkeys(problems))
+
+
+# ---------------------------------------------------------------- quotes from documents
+
+QUOTE = re.compile(r'[“"]([^”"]{20,600})[”"]\s*((?:\[S\d+(?:\s*,\s*S\d+)*\]\s*)*)')
+
+
+def _norm(text: str) -> str:
+    text = text.lower().replace("’", "'").replace("‘", "'").replace("‑", "-").replace("–", "-").replace("—", "-")
+    return re.sub(r"[^a-z0-9%₹.,'-]+", " ", text).strip()
+
+
+def _passages(tool_outputs: list[str]) -> dict[str, str]:
+    """Document text by source id, from search_documents results."""
+    out: dict[str, str] = {}
+
+    def walk(node):
+        if isinstance(node, dict):
+            if isinstance(node.get("source"), str) and isinstance(node.get("text"), str) and "page" in node:
+                out[node["source"]] = out.get(node["source"], "") + " " + node["text"]
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    for o in tool_outputs:
+        try:
+            walk(json.loads(o))
+        except json.JSONDecodeError:
+            continue
+    return out
+
+
+def unsupported_quotes(answer: str, tool_outputs: list[str]) -> list[str]:
+    """Quoted passages that don't appear word for word in the document page they cite (or, uncited, in any
+    retrieved passage). Only checked when document passages were retrieved."""
+    passages = _passages(tool_outputs)
+    if not passages:
+        return []
+    problems = []
+    for m in QUOTE.finditer(answer):
+        ids = re.findall(r"S\d+", m.group(2) or "")
+        pool = " ".join(passages.get(i, "") for i in ids) if ids else " ".join(passages.values())
+        if ids and not any(i in passages for i in ids):
+            continue  # quote cites non-document sources (e.g. a data table); the numbers checks cover those
+        haystack = _norm(pool)
+        parts = [p for p in re.split(r"\.\.\.|…", m.group(1)) if len(p.strip()) > 8]  # allow elisions
+        if not all(_norm(p) in haystack for p in parts):
+            problems.append(f'"{m.group(1)[:80]}"{(" " + m.group(2).strip()) if m.group(2) else ""}')
+    return problems
+
+
+# ---------------------------------------------------------------- arithmetic re-check (FinGround-style)
+
+_AMOUNT = r"(-?₹?\s?\d[\d,]*(?:\.\d+)?)\s*(L\s?Cr|lakh crore|Cr|crore)?"
+FROM_TO = re.compile(rf"from\s+{_AMOUNT}(?:\s+(?:in\s+)?FY\s?\d{{2,4}})?\s+to\s+{_AMOUNT}", re.IGNORECASE)
+ARROW = re.compile(rf"{_AMOUNT}\s*(?:→|->)\s*{_AMOUNT}")
+PERCENT = re.compile(r"(-?\d+(?:\.\d+)?)\s?%")
+YEARS = re.compile(r"(?:over|in)\s+(\d{1,2})\s+years|FY\s?(\d{2,4})\s*(?:to|-|–|→)\s*FY\s?(\d{2,4})", re.IGNORECASE)
+
+
+def _amount(num: str, unit: str | None) -> float:
+    value = float(num.replace("₹", "").replace(",", "").strip())
+    return value * 1e5 if unit and unit.lower().replace(" ", "").startswith(("lcr", "lakh")) else value
+
+
+def arithmetic_errors(answer: str) -> list[str]:
+    """Growth claims whose stated percentage doesn't match the figures in the same sentence, e.g.
+    "profit rose 16% from ₹42,147 Cr to ₹49,210 Cr" (actual change 16.8% -> ok; "25%" -> flagged).
+    Conservative: one from/to pair per sentence, amounts only (not percentage-point moves)."""
+    problems = []
+    for sentence in re.split(r"(?<=[.;])\s+|\n", answer):
+        pairs = FROM_TO.findall(sentence) + ARROW.findall(sentence)
+        if len(pairs) != 1:
+            continue
+        a_num, a_unit, b_num, b_unit = pairs[0]
+        if "%" in sentence[sentence.find(a_num):sentence.find(a_num) + len(a_num) + 2]:
+            continue  # from 11% to 9%: a percentage-point move, not a growth rate
+        a, b = _amount(a_num, a_unit), _amount(b_num, b_unit)
+        if a <= 0:
+            continue
+        stated = [abs(float(p)) for p in PERCENT.findall(sentence)]
+        if not stated:
+            continue
+        change = abs((b - a) / a * 100)
+        candidates = [change]
+        y = YEARS.search(sentence)
+        fys = [int(f[-2:]) for f in re.findall(r"FY\s?(\d{2,4})", sentence, re.IGNORECASE)]
+        n = 0
+        if y and y.group(1):
+            n = int(y.group(1))
+        elif len(fys) >= 2:
+            n = max(fys) - min(fys)   # "from ₹X in FY23 to ₹Y in FY26" -> 3 years
+        if n > 0:
+            if b > 0:
+                candidates.append(abs(((b / a) ** (1 / n) - 1) * 100))
+        if not any(abs(s - c) <= max(0.6, 0.03 * c) for s in stated for c in candidates):
+            problems.append(f"{sentence.strip()[:140]} (the figures imply {change:.1f}%"
+                            + (f", or {candidates[1]:.1f}% a year" if len(candidates) > 1 else "") + ")")
+    return problems

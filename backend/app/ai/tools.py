@@ -51,6 +51,21 @@ TOOLS = [
         "input_schema": {"type": "object", "properties": {"symbol": SYMBOL}, "required": ["symbol"]},
     },
     {
+        "name": "search_documents",
+        "description": "Search the company's latest annual report and recent NSE filings for what the company or "
+                       "management said: strategy, reasons behind results, guidance, risks, orders, deals. Returns "
+                       "passages with page numbers. Quote exact words from them.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": SYMBOL,
+                "query": {"type": "string", "description": "Specific search words, e.g. 'attrition rate' or 'generative AI revenue'"},
+                "kind": {"type": "string", "enum": ["any", "annual_report", "filing"]},
+            },
+            "required": ["symbol", "query"],
+        },
+    },
+    {
         "name": "compare_companies",
         "description": "Key metrics side by side for 2-6 companies (peer comparison).",
         "input_schema": {
@@ -202,6 +217,27 @@ def _announcements(args, sources: Sources):
     return {"announcements": items[:8], "note": "Routine procedural filings are omitted."}
 
 
+def _search_documents(args, sources: Sources):
+    from app import docs  # local import: keeps the tool list importable without the database
+    symbol = yahoo.normalize_symbol(args["symbol"])
+    try:
+        docs.index_filings(symbol)  # small PDFs; indexed on first use, cheap afterwards
+    except Exception:
+        pass  # search whatever is already stored
+    kind = None if args.get("kind") in (None, "any") else args["kind"]
+    rows = docs.search(symbol, args["query"], kind, limit=5)
+    have = docs.coverage(symbol)
+    passages = []
+    for r in rows:
+        label = "annual report" if r["kind"] == "annual_report" else "filing"
+        sid = sources.add(f"NSE {label}, page {r['page']}", f"{r['url']}#page={r['page']}",
+                          f"{symbol}: {r['title'][:120]}")
+        passages.append({"source": sid, "document": r["title"][:120], "page": r["page"], "text": r["text"][:1200]})
+    note = None if "annual_report" in have else "This company's annual report isn't indexed yet; only recent filings were searched."
+    return {"passages": passages, **({"note": note} if note else {}),
+            **({} if passages else {"result": "No matching passages found."})}
+
+
 def _compare(args, sources: Sources):
     symbols = args["symbols"][:6]
     stored = screener.lookup(symbols)
@@ -266,6 +302,7 @@ HANDLERS = {
     "get_valuation": _valuation,
     "get_news": _news,
     "get_announcements": _announcements,
+    "search_documents": _search_documents,
     "compare_companies": _compare,
     "run_screen": _screen,
     "calculate": _calculate,

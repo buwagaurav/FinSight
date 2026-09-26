@@ -175,7 +175,7 @@ export type AskResult = {
   answer: string;
   sources: AskSource[];
   tool_calls: { tool: string; input: Record<string, unknown>; error: boolean }[];
-  verification: { passed: boolean; unverified: string[]; misattributed?: string[]; note: string };
+  verification: { passed: boolean; unverified: string[]; misattributed?: string[]; unsupported_quotes?: string[]; arithmetic?: string[]; note: string };
   model: string;
 };
 export type AiTask = "assistant" | "report" | "summary" | "screen";

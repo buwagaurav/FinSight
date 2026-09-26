@@ -25,7 +25,7 @@ from langgraph.runtime import Runtime
 from app import db
 from app.ai import llm
 from app.ai import tools as T
-from app.ai.verify import misattributed, unverified_numbers
+from app.ai.verify import arithmetic_errors, misattributed, unsupported_quotes, unverified_numbers
 
 MAX_REWRITES = 2
 
@@ -49,7 +49,7 @@ ANALYSTS = {
     },
     "developments": {
         "title": "Filings & news analyst",
-        "tools": ["get_announcements", "get_news"],
+        "tools": ["get_announcements", "get_news", "search_documents"],
         "brief": "Summarise the material recent developments from official NSE filings first, then news. For each: "
                  "what happened, why it matters, and whether it is positive, negative or uncertain. Ignore routine items.",
     },
@@ -146,7 +146,13 @@ def checker(state: ReportState, runtime: Runtime[Ctx]):
     runtime.context.on_progress("check", "running")
     missing = unverified_numbers(state["report"], state["outputs"])
     wrong = misattributed(state["report"], state["outputs"])
+    quotes = unsupported_quotes(state["report"], state["outputs"])
+    maths = arithmetic_errors(state["report"])
     problems = []
+    if quotes:
+        problems.append("These quotes are not word-for-word in the cited page: " + "; ".join(quotes) + ". Quote exactly or paraphrase.")
+    if maths:
+        problems.append("These calculations don't match their own figures: " + "; ".join(maths) + ". Correct them using the drafts.")
     if wrong:
         problems.append("These figures are cited to a source that does not contain them: " + ", ".join(wrong) + ". Fix the citation to match the drafts.")
     if missing:
@@ -156,7 +162,7 @@ def checker(state: ReportState, runtime: Runtime[Ctx]):
     if not cited:
         problems.append("The report cites no sources. Keep the drafts' [S#] citations next to each figure.")
     runtime.context.on_progress("check", "done" if not problems else "retry")
-    return {"unverified": missing + wrong, "feedback": " ".join(problems)}
+    return {"unverified": missing + wrong + quotes + maths, "feedback": " ".join(problems)}
 
 
 def _after_check(state: ReportState):

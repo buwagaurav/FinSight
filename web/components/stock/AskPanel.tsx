@@ -21,6 +21,7 @@ const TOOL_LABELS: Record<string, string> = {
   get_financials: "Read annual statements",
   get_valuation: "Read valuation and scenarios",
   get_news: "Read recent news",
+  search_documents: "Searched annual report & filings",
   compare_companies: "Compared companies",
   run_screen: "Ran a screen",
   calculate: "Calculated",
@@ -34,11 +35,13 @@ function Answer({ result }: { result: AskResult }) {
       <CitedMarkdown text={result.answer} sources={result.sources} />
 
       {v.passed ? (
-        <Badge variant="good">✓ Every figure matched the source it cites</Badge>
+        <Badge variant="good">✓ Every figure, quote and calculation checked against its source</Badge>
       ) : (
         <div className="rounded-lg border border-warn/40 bg-warn-soft p-2.5 text-xs text-ink-2">
           {v.unverified.length > 0 && <div><span className="font-semibold text-warn">● Not found in FinSight data: </span>{v.unverified.join(", ")}</div>}
           {(v.misattributed ?? []).length > 0 && <div><span className="font-semibold text-warn">● Cited to the wrong source: </span>{v.misattributed!.join(", ")}</div>}
+          {(v.unsupported_quotes ?? []).length > 0 && <div><span className="font-semibold text-warn">● Quote not found on the cited page: </span>{v.unsupported_quotes!.join("; ")}</div>}
+          {(v.arithmetic ?? []).length > 0 && <div><span className="font-semibold text-warn">● Calculation doesn't match its figures: </span>{v.arithmetic!.join("; ")}</div>}
           <div className="mt-1">{v.note}</div>
         </div>
       )}

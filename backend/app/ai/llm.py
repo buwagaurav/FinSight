@@ -23,7 +23,7 @@ import openai
 from pydantic import BaseModel, ValidationError
 
 from app.ai import tools as T
-from app.ai.verify import misattributed, unverified_numbers
+from app.ai.verify import arithmetic_errors, misattributed, unsupported_quotes, unverified_numbers
 
 TASKS = ("assistant", "report", "summary", "screen")
 DEFAULT_MODEL = "anthropic:claude-opus-5"
@@ -284,7 +284,9 @@ def run_agent(system: str, messages: list[dict], tool_names: list[str] | None, s
             answer += "\n\n_(Cut off at the length limit.)_"
         missing = unverified_numbers(answer, outputs, question)
         wrong = misattributed(answer, outputs)
-        if (missing or wrong) and not repaired:
+        quotes = unsupported_quotes(answer, outputs)
+        maths = arithmetic_errors(answer)
+        if (missing or wrong or quotes or maths) and not repaired:
             repaired = True
             problems = []
             if missing:
@@ -293,14 +295,21 @@ def run_agent(system: str, messages: list[dict], tool_names: list[str] | None, s
             if wrong:
                 problems.append("these figures are cited to a source that does not contain them: " + ", ".join(wrong)
                                 + ". Cite the source id whose data actually contains each figure")
+            if quotes:
+                problems.append("these quotes are not word-for-word in the cited document page: " + "; ".join(quotes)
+                                + ". Quote the passage exactly or paraphrase without quotation marks")
+            if maths:
+                problems.append("these calculations don't match their own figures: " + "; ".join(maths)
+                                + ". Use the calculate tool and correct them")
             history.append({"role": "user", "content": "FinSight verification: " + "; and ".join(problems)
                             + ". Reply with the complete corrected answer only."})
             continue
         return {"answer": answer, "outputs": outputs, "calls": calls, "unverified": missing,
-                "misattributed": wrong, "model": model, "usage": usage}
+                "misattributed": wrong, "unsupported_quotes": quotes, "arithmetic": maths, "model": model, "usage": usage}
 
     return {"answer": "Research did not finish within the step limit. Try a narrower question.",
-            "outputs": outputs, "calls": calls, "unverified": [], "misattributed": [], "model": model, "usage": usage}
+            "outputs": outputs, "calls": calls, "unverified": [], "misattributed": [], "unsupported_quotes": [],
+            "arithmetic": [], "model": model, "usage": usage}
 
 
 def cited_sources(text: str, sources: T.Sources) -> list[dict]:

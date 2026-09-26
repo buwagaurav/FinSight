@@ -17,6 +17,8 @@ Rules:
 - Cite the source id right after each fact, e.g. "net profit ₹49,210 Cr [S2]".
 - If data is already provided in the message, use it; call tools only for what is missing, and request everything
   you need in ONE turn (several tool calls at once), not one tool per turn.
+- For what the company or management said (strategy, reasons, guidance, risks), use search_documents and quote
+  the exact words in "double quotes" followed by the citation, e.g. "attrition was 13.3%" [S4].
 - Say plainly when data is missing. Round sensibly (48.72 -> 48.7%). Amounts are ₹ crore; "L Cr" = lakh crore.
 - Plain language; briefly define jargon. No buy/sell advice or price targets; for the future, describe scenarios
   and what to monitor. GMP is unofficial. Mention data_checks warnings when relevant.
@@ -60,8 +62,13 @@ def ask(question: str, symbol: str | None = None, history: list[dict] | None = N
     except llm.AIRefused:
         run = {"answer": "I can't help with that request. Try asking about a company's financials, valuation or news.",
                "calls": [], "unverified": [], "misattributed": [], "model": llm.model_spec("assistant"), "usage": {}}
-    return {**_result(run["answer"], sources, run["calls"], run["unverified"], run["model"], run["misattributed"]),
-            "usage": run["usage"]}
+    result = _result(run["answer"], sources, run["calls"], run["unverified"], run["model"], run["misattributed"])
+    v = result["verification"]
+    v["unsupported_quotes"], v["arithmetic"] = run.get("unsupported_quotes", []), run.get("arithmetic", [])
+    if v["unsupported_quotes"] or v["arithmetic"]:
+        v["passed"] = False
+        v["note"] = "Some quotes or calculations could not be confirmed against their sources. Treat them with caution."
+    return {**result, "usage": run["usage"]}
 
 
 def _result(answer: str, sources: T.Sources, calls: list[dict], missing: list[str], model: str,

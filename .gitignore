@@ -20,3 +20,4 @@ web/.next/
 .DS_Store
 .netlify/
 web/.netlify/
+*.iml
