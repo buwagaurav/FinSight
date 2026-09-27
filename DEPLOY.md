@@ -43,6 +43,25 @@ name `DATABASE_URL`, value = the Neon connection string. The "Refresh market dat
 In Render, set `FINSIGHT_CORS_ORIGINS` to the Netlify address (no trailing slash) and save; Render redeploys.
 Open the Netlify site. The first load may take up to a minute while the free API wakes up.
 
+## 6. Google sign-in
+Research pages stay public; signing in with Google unlocks the AI features, with a daily allowance per user.
+
+1. **Google Cloud Console** (https://console.cloud.google.com): create a project, then **Google Auth Platform**
+   (OAuth consent screen): app name *FinSight*, your support email, audience **External**.
+2. **Clients > Create client > Web application**:
+   - Authorized JavaScript origins: `https://<your-site>.netlify.app` and `http://localhost:3000`
+   - Authorized redirect URIs: `https://<your-site>.netlify.app/api/auth/callback/google` and
+     `http://localhost:3000/api/auth/callback/google`
+   - Copy the **Client ID** and **Client secret**.
+3. **Audience > Publish app** (switch from "Testing" to "In production"). FinSight only asks for name, email and
+   profile picture, so Google doesn't require a review; while in Testing, only listed test users can sign in.
+4. Generate two random secrets: run `openssl rand -base64 32` twice.
+5. **Netlify** environment variables: `AUTH_SECRET` (secret 1), `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`,
+   `FINSIGHT_API_JWT_SECRET` (secret 2). Redeploy.
+6. **Render** environment: `FINSIGHT_API_JWT_SECRET` (the same secret 2). Save; Render redeploys.
+
+If you rename the Netlify site, update both Google URLs and `FINSIGHT_CORS_ORIGINS`.
+
 ## Known limits
 - **Cold starts:** the free API sleeps when idle; the first visit afterwards is slow.
 - **NSE may block cloud servers:** the IPO list, live subscription and filings come from NSE, which often rejects

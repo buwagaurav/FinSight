@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { Badge, Card, Skeleton } from "@/components/ui";
 import { AiStatus, Announcement, api, SummaryResult } from "@/lib/api";
 import { date } from "@/lib/format";
+import SignInPrompt from "@/components/SignInPrompt";
+import { useUser } from "@/components/UserContext";
 
 const SENTIMENT = {
   positive: { variant: "good", icon: "▲", label: "Positive" },
@@ -50,6 +52,7 @@ function Summary({ r }: { r: SummaryResult }) {
 }
 
 export default function Filings({ symbol }: { symbol: string }) {
+  const { user } = useUser();
   const [items, setItems] = useState<Announcement[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ai, setAi] = useState<AiStatus | null>(null);
@@ -66,7 +69,7 @@ export default function Filings({ symbol }: { symbol: string }) {
     setLoading((l) => ({ ...l, [a.id]: true }));
     setFailed((f) => ({ ...f, [a.id]: "" }));
     try {
-      const r = await api<SummaryResult>(`/api/company/${encodeURIComponent(symbol)}/announcements/${a.id}/summary`, { method: "POST" });
+      const r = await api<SummaryResult>(`/api/company/${encodeURIComponent(symbol)}/announcements/${a.id}/summary`, { method: "POST" }, { auth: true });
       setItems((list) => list?.map((x) => (x.id === a.id ? { ...x, summary: r } : x)) ?? null);
     } catch (e) {
       setFailed((f) => ({ ...f, [a.id]: (e as Error).message }));
@@ -85,6 +88,9 @@ export default function Filings({ symbol }: { symbol: string }) {
         : undefined}>
       {error && <p className="text-sm text-muted">NSE filings are unavailable right now.</p>}
       {!items && !error && <div className="space-y-3"><Skeleton className="h-14" /><Skeleton className="h-14" /></div>}
+      {ai?.tasks.summary.configured && ai.sign_in_required && !user && items && (
+        <div className="mb-3"><SignInPrompt what="get AI summaries of these filings" /></div>
+      )}
       {ai && !ai.tasks.summary.configured && items && (
         <p className="text-xs text-muted mb-2">Add credentials for {ai.tasks.summary.model} in backend/.env to get AI summaries of these filings.</p>
       )}
@@ -97,7 +103,7 @@ export default function Filings({ symbol }: { symbol: string }) {
               {a.pdf_url && <a href={a.pdf_url} target="_blank" rel="noreferrer" className="underline hover:text-ink">Filing PDF{a.pdf_size ? ` (${a.pdf_size})` : ""} ↗</a>}
             </div>
             <p className="text-sm text-ink-2 mt-1.5 line-clamp-3">{a.text}</p>
-            {a.summary ? <Summary r={a.summary} /> : ai?.tasks.summary.configured && (
+            {a.summary ? <Summary r={a.summary} /> : ai?.tasks.summary.configured && (!ai.sign_in_required || user) && (
               <button onClick={() => summarise(a)} disabled={loading[a.id]}
                 className="mt-2 text-xs px-3 py-1.5 rounded-lg border border-line hover:border-accent hover:text-accent disabled:opacity-60">
                 {loading[a.id] ? "Reading the filing…" : "Summarise with AI"}

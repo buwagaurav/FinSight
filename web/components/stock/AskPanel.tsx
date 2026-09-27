@@ -4,6 +4,8 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import CitedMarkdown, { SourceList } from "@/components/CitedMarkdown";
 import { Badge, Card } from "@/components/ui";
 import { AiStatus, api, AskResult } from "@/lib/api";
+import SignInPrompt from "@/components/SignInPrompt";
+import { useUser } from "@/components/UserContext";
 
 type Turn = { id: number; question: string; result?: AskResult; error?: string };
 
@@ -65,6 +67,7 @@ function Answer({ result }: { result: AskResult }) {
 }
 
 export default function AskPanel({ symbol, name }: { symbol: string; name: string }) {
+  const { user } = useUser();
   const [status, setStatus] = useState<AiStatus | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
@@ -87,7 +90,7 @@ export default function AskPanel({ symbol, name }: { symbol: string; name: strin
     setInput("");
     setBusy(true);
     try {
-      const result = await api<AskResult>("/api/ask", { method: "POST", body: JSON.stringify({ question: q, symbol, history }) });
+      const result = await api<AskResult>("/api/ask", { method: "POST", body: JSON.stringify({ question: q, symbol, history }) }, { auth: true });
       setTurns((ts) => ts.map((t) => (t.id === id ? { ...t, result } : t)));
     } catch (e) {
       setTurns((ts) => ts.map((t) => (t.id === id ? { ...t, error: (e as Error).message } : t)));
@@ -99,6 +102,14 @@ export default function AskPanel({ symbol, name }: { symbol: string; name: strin
   function submit(e: FormEvent) {
     e.preventDefault();
     ask(input);
+  }
+
+  if (status?.configured && status.sign_in_required && !user) {
+    return (
+      <Card title={<>Ask FinSight AI <span className="text-xs font-normal text-muted ml-1">about {name}</span></>}>
+        <SignInPrompt what={`ask questions about ${name} and get answers checked against the source`} />
+      </Card>
+    );
   }
 
   if (status && !status.configured) {

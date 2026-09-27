@@ -7,11 +7,11 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")  # before app.ai reads its settings
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from app import gmp, loader, research, screener
+from app import auth, gmp, loader, research, screener
 from app.ai import assistant, filings, llm, report, screen_nl
 from app.providers import nse, yahoo
 
@@ -103,7 +103,11 @@ def company_announcements(symbol: str, limit: int = Query(30, le=100)):
 
 
 @app.post("/api/company/{symbol}/announcements/{announcement_id}/summary")
-def summarize_announcement(symbol: str, announcement_id: str):
+def summarize_announcement(symbol: str, announcement_id: str, user: dict = Depends(auth.require_user)):
+    if not filings.cached(announcement_id):
+        if not llm.is_configured("summary"):
+            raise HTTPException(503, f"No credentials for {llm.model_spec('summary')}.")
+        auth.consume(user, "summary")  # stored summaries are free to reopen
     try:
         return filings.summarize(symbol, announcement_id)
     except llm.AIUnavailable as e:
@@ -174,7 +178,10 @@ class NLScreenRequest(BaseModel):
 
 
 @app.post("/api/screener/parse")
-def parse_screen(req: NLScreenRequest):
+def parse_screen(req: NLScreenRequest, user: dict = Depends(auth.require_user)):
+    if not llm.is_configured("screen"):
+        raise HTTPException(503, f"No credentials for {llm.model_spec('screen')}.")
+    auth.consume(user, "screen")
     try:
         return screen_nl.parse(req.query)
     except llm.AIUnavailable as e:
@@ -202,11 +209,20 @@ class AskRequest(BaseModel):
 @app.get("/api/ai/status")
 def ai_status():
     tasks = llm.status()
-    return {"configured": tasks["assistant"]["configured"], "model": tasks["assistant"]["model"], "tasks": tasks}
+    return {"configured": tasks["assistant"]["configured"], "model": tasks["assistant"]["model"], "tasks": tasks,
+            "sign_in_required": auth.enabled()}
+
+
+@app.get("/api/me")
+def me(user: dict = Depends(auth.require_user)):
+    return {"user": user, "ai_usage": auth.usage(user), "costs": auth.COST}
 
 
 @app.post("/api/ask")
-def ask(req: AskRequest):
+def ask(req: AskRequest, user: dict = Depends(auth.require_user)):
+    if not llm.is_configured("assistant"):
+        raise HTTPException(503, f"No credentials for {llm.model_spec('assistant')}.")
+    auth.consume(user, "ask")
     try:
         return assistant.ask(req.question, req.symbol, [t.model_dump() for t in req.history])
     except llm.AIUnavailable as e:
@@ -214,7 +230,10 @@ def ask(req: AskRequest):
 
 
 @app.post("/api/company/{symbol}/report")
-def start_report(symbol: str):
+def start_report(symbol: str, user: dict = Depends(auth.require_user)):
+    if not llm.is_configured("report"):
+        raise HTTPException(503, f"No credentials for {llm.model_spec('report')}.")
+    auth.consume(user, "report")
     try:
         profile = yahoo.profile(yahoo.normalize_symbol(symbol))
         return {"job_id": report.start_job(profile["symbol"], profile["name"])}

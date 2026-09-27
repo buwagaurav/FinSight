@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import CitedMarkdown, { SourceList } from "@/components/CitedMarkdown";
 import { Badge, Card, Skeleton } from "@/components/ui";
 import { AiStatus, api, ReportJob, ReportResult } from "@/lib/api";
+import SignInPrompt from "@/components/SignInPrompt";
+import { useUser } from "@/components/UserContext";
 
 const SECTION_TITLES: Record<string, string> = {
   fundamentals: "Fundamentals analyst",
@@ -29,6 +31,7 @@ function Progress({ job }: { job: ReportJob }) {
 }
 
 export default function ResearchReport({ symbol, name }: { symbol: string; name: string }) {
+  const { user } = useUser();
   const [ai, setAi] = useState<AiStatus | null>(null);
   const [report, setReport] = useState<ReportResult | null | undefined>(undefined);
   const [job, setJob] = useState<ReportJob | null>(null);
@@ -44,7 +47,7 @@ export default function ResearchReport({ symbol, name }: { symbol: string; name:
   async function generate() {
     setError(null);
     try {
-      const { job_id } = await api<{ job_id: string }>(`/api/company/${encodeURIComponent(symbol)}/report`, { method: "POST" });
+      const { job_id } = await api<{ job_id: string }>(`/api/company/${encodeURIComponent(symbol)}/report`, { method: "POST" }, { auth: true });
       timer.current = setInterval(async () => {
         try {
           const j = await api<ReportJob>(`/api/reports/jobs/${job_id}`);
@@ -69,7 +72,8 @@ export default function ResearchReport({ symbol, name }: { symbol: string; name:
 
   if (report === undefined) return <Skeleton className="h-48" />;
 
-  const canGenerate = ai?.tasks.report.configured && !job;
+  const needsSignIn = Boolean(ai?.tasks.report.configured && ai.sign_in_required && !user);
+  const canGenerate = ai?.tasks.report.configured && !needsSignIn && !job;
   const header = (
     <div className="flex flex-wrap items-center gap-2">
       {report && <span className="text-xs text-muted">Generated {new Date(report.generated_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })} in {report.duration_s < 60 ? `${report.duration_s}s` : `${Math.round(report.duration_s / 60)} min`} · {report.model}</span>}
@@ -87,7 +91,8 @@ export default function ResearchReport({ symbol, name }: { symbol: string; name:
         {ai && !ai.tasks.report.configured && !report && (
           <p className="text-sm text-ink-2">Add credentials for <code>{ai.tasks.report.model}</code> in <code>backend/.env</code> to generate multi-agent research reports.</p>
         )}
-        {ai?.tasks.report.configured && !report && !job && (
+        {needsSignIn && <SignInPrompt what="generate multi-agent research reports" />}
+        {ai?.tasks.report.configured && !needsSignIn && !report && !job && (
           <div className="text-sm text-ink-2 space-y-2">
             <p>Three AI analysts research this company in parallel (fundamentals, valuation, and filings &amp; news), a risk reviewer challenges their work, and an editor writes the report. Every figure is then checked against the data the analysts actually retrieved.</p>
             <p className="text-xs text-muted">Takes about 2–5 minutes and roughly 20–40 model calls. The report is saved, so it only needs generating once.</p>

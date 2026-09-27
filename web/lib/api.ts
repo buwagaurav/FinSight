@@ -161,8 +161,23 @@ export type ScreenResult = {
 // Local dev: unset, so "/api/..." goes through the Next.js rewrite to localhost:8010.
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "");
 
-export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(API_BASE + path, { ...init, headers: { "content-type": "application/json", ...init?.headers } });
+let cachedToken: { token: string; expires_at: number } | null = null;
+
+/** Short-lived pass for AI requests, issued by this website for the signed-in user (null if signed out). */
+async function apiToken(): Promise<string | null> {
+  if (cachedToken && cachedToken.expires_at - Date.now() > 60_000) return cachedToken.token;
+  const res = await fetch("/auth-token", { cache: "no-store" });
+  if (!res.ok) return null;
+  cachedToken = await res.json();
+  return cachedToken!.token;
+}
+
+export async function api<T>(path: string, init?: RequestInit, opts?: { auth?: boolean }): Promise<T> {
+  const token = opts?.auth ? await apiToken() : null;
+  const res = await fetch(API_BASE + path, {
+    ...init,
+    headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}), ...init?.headers },
+  });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.detail ?? `Request failed (${res.status})`);
@@ -179,7 +194,7 @@ export type AskResult = {
   model: string;
 };
 export type AiTask = "assistant" | "report" | "summary" | "screen";
-export type AiStatus = { configured: boolean; model: string; tasks: Record<AiTask, { model: string; configured: boolean }> };
+export type AiStatus = { configured: boolean; model: string; sign_in_required?: boolean; tasks: Record<AiTask, { model: string; configured: boolean }> };
 
 export type FilingSummary = {
   headline: string;

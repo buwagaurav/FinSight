@@ -24,3 +24,7 @@ services:
         sync: false
       - key: FINSIGHT_CORS_ORIGINS # your Netlify site, e.g. https://finsight.netlify.app
         sync: false
+      - key: FINSIGHT_API_JWT_SECRET # same value as on Netlify; turns on "sign in to use AI"
+        sync: false
+      - key: FINSIGHT_AI_DAILY_LIMIT # AI allowance per user per day (a report uses 10)
+        value: "30"

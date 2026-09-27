@@ -1,102 +1,103 @@
-"use client";
-
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import SearchBox from "@/components/SearchBox";
-import { Badge, Card, InfoTip, Skeleton } from "@/components/ui";
-import { api, Ipo } from "@/lib/api";
-import { date, rupees } from "@/lib/format";
+import { redirect } from "next/navigation";
+import GoogleButton from "@/components/GoogleButton";
+import { authEnabled, currentUser } from "@/auth";
 
-const POPULAR = [
-  { symbol: "RELIANCE.NS", name: "Reliance" },
-  { symbol: "TCS.NS", name: "TCS" },
-  { symbol: "HDFCBANK.NS", name: "HDFC Bank" },
-  { symbol: "INFY.NS", name: "Infosys" },
-  { symbol: "ITC.NS", name: "ITC" },
-  { symbol: "TITAN.NS", name: "Titan" },
-  { symbol: "BAJFINANCE.NS", name: "Bajaj Finance" },
-  { symbol: "TATASTEEL.NS", name: "Tata Steel" },
+const FEATURES = [
+  { title: "The whole NSE market", body: "Screen about 2,550 listed companies by ROE, debt, growth, valuation and sector, or describe the screen in plain English." },
+  { title: "Explained scores", body: "Every score lists the exact figures that moved it, so you can see why a company rates the way it does." },
+  { title: "Filings and annual reports", body: "Official NSE filings and annual reports, searchable, with quotes that open the exact PDF page." },
+  { title: "IPOs and GMP", body: "Live NSE subscription with grey-market premium history, always marked unofficial and unverified." },
 ];
 
-const SCREENS = [
-  { title: "Quality compounders", desc: "ROE above 18%, low debt, profit growing 10%+ a year", preset: "quality" },
-  { title: "Reasonably priced growth", desc: "Profit growth above 12% with P/E under 30", preset: "garp" },
-  { title: "Dividend payers", desc: "Dividend yield above 2% with manageable debt", preset: "dividend" },
-];
-
-export default function Home() {
-  const [ipos, setIpos] = useState<Ipo[] | null>(null);
-  const [ipoError, setIpoError] = useState(false);
-
-  useEffect(() => {
-    api<Ipo[]>("/api/ipos").then(setIpos).catch(() => setIpoError(true));
-  }, []);
-
-  const mainboard = ipos?.filter((i) => i.segment === "Mainboard") ?? [];
+export default async function Landing() {
+  if (await currentUser()) redirect("/home");
 
   return (
-    <div className="space-y-8">
-      <section className="pt-6 sm:pt-12 pb-2 text-center max-w-2xl mx-auto">
-        <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight">Research any stock in one place</h1>
-        <p className="text-ink-2 mt-3">
-          Fundamentals, valuation, screening and IPOs together, with every score explained in plain language.
-        </p>
-        <div className="mt-6 text-left"><SearchBox large autoFocus /></div>
-        <div className="mt-4 flex flex-wrap justify-center gap-2">
-          {POPULAR.map((p) => (
-            <Link key={p.symbol} href={`/stock/${p.symbol}`}
-              className="text-sm px-3 py-1.5 rounded-full border border-line bg-surface hover:border-accent hover:text-accent">
-              {p.name}
+    <div className="space-y-14 sm:space-y-20 py-4 sm:py-10">
+      <section className="grid lg:grid-cols-[1.1fr_1fr] gap-10 lg:gap-14 items-center">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-accent">For Indian investors</p>
+          <h1 className="mt-3 text-4xl sm:text-5xl font-semibold tracking-tight leading-[1.08] text-balance">
+            Research any NSE stock in one place.
+          </h1>
+          <p className="mt-5 text-lg text-ink-2 max-w-[34rem]">
+            Fundamentals, valuation, official filings, IPO GMP and an AI assistant that checks every number it gives you
+            against the source.
+          </p>
+          <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-4">
+            {authEnabled ? (
+              <GoogleButton next="/home" />
+            ) : (
+              <Link href="/home" className="inline-flex h-12 items-center rounded-full bg-accent px-6 font-medium text-white hover:opacity-90">
+                Explore FinSight
+              </Link>
+            )}
+            <Link href="/home" className="text-sm font-medium text-ink-2 hover:text-ink underline-offset-4 hover:underline">
+              Explore without an account →
             </Link>
+          </div>
+          <p className="mt-4 text-sm text-muted">
+            {authEnabled
+              ? "Free. Research is open to everyone; signing in unlocks the AI assistant, filing summaries and reports."
+              : "Free and open. Sign-in isn't configured on this server yet."}
+          </p>
+        </div>
+
+        <figure className="rounded-2xl border border-line bg-surface p-5 sm:p-6 shadow-sm" aria-label="Example company analysis">
+          <figcaption className="flex items-center justify-between text-xs text-muted">
+            <span>Example · Tata Consultancy Services</span>
+            <span>Sep 2026</span>
+          </figcaption>
+          <div className="mt-4 flex items-start justify-between gap-4">
+            <p className="text-[15px] leading-snug text-ink">
+              Strong fundamentals, moderate growth, fair valuation, low balance-sheet risk; price in a downtrend.
+            </p>
+            <div className="text-center shrink-0">
+              <div className="text-3xl font-semibold tabular-nums">72</div>
+              <div className="mt-1 rounded-full bg-good-soft px-2 py-0.5 text-[11px] font-semibold text-good">▲ Strong</div>
+            </div>
+          </div>
+          <dl className="mt-5 grid grid-cols-3 gap-3 border-t border-line pt-4 text-sm">
+            <div><dt className="text-xs text-muted">ROE</dt><dd className="font-semibold tabular-nums">48.7%</dd></div>
+            <div><dt className="text-xs text-muted">P/E vs 4-yr median</dt><dd className="font-semibold tabular-nums">15.1 / 25.3</dd></div>
+            <div><dt className="text-xs text-muted">Net profit FY26</dt><dd className="font-semibold tabular-nums">₹49,210 Cr</dd></div>
+          </dl>
+          <div className="mt-5 rounded-xl bg-surface-2 p-4 text-sm">
+            <p className="text-xs font-medium text-muted">Ask FinSight: “What does TCS say about attrition?”</p>
+            <p className="mt-2 text-ink-2">
+              The annual report states{" "}
+              <span className="text-ink">“voluntary IT services’ attrition at 13.7%”</span>
+              <span className="ml-1 rounded bg-accent-soft px-1 text-[10px] font-medium text-accent align-super">p.56</span>
+            </p>
+            <p className="mt-3 inline-flex rounded-full bg-good-soft px-2 py-0.5 text-[11px] font-semibold text-good">
+              ✓ Quote found on the cited page
+            </p>
+          </div>
+        </figure>
+      </section>
+
+      <section aria-labelledby="features-h">
+        <h2 id="features-h" className="sr-only">What FinSight does</h2>
+        <div className="grid gap-x-8 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">
+          {FEATURES.map((f) => (
+            <div key={f.title} className="border-t border-line pt-4">
+              <h3 className="font-semibold">{f.title}</h3>
+              <p className="mt-2 text-sm text-ink-2 leading-relaxed">{f.body}</p>
+            </div>
           ))}
         </div>
       </section>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2" title={<>IPOs open now <InfoTip term="Subscription" /></>}
-          action={<Link href="/ipo" className="text-sm text-accent hover:underline">All IPOs & GMP →</Link>}>
-          {ipoError && <p className="text-sm text-muted">IPO data from NSE is unavailable right now.</p>}
-          {!ipos && !ipoError && <div className="space-y-2"><Skeleton className="h-12" /><Skeleton className="h-12" /><Skeleton className="h-12" /></div>}
-          {ipos && mainboard.length === 0 && <p className="text-sm text-muted">No mainboard IPOs are open today.</p>}
-          <ul className="divide-y divide-line">
-            {mainboard.slice(0, 5).map((i) => (
-              <li key={i.symbol} className="py-2.5 flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-medium truncate">{i.name}</div>
-                  <div className="text-xs text-muted">
-                    {rupees(i.price_low, 0)}–{rupees(i.price_high, 0)} · closes {date(i.close_date)}
-                  </div>
-                </div>
-                <div className="text-right shrink-0">
-                  <div className="text-sm font-semibold tabular">{i.subscription_times != null ? `${i.subscription_times.toFixed(2)}x` : "—"}</div>
-                  <div className="text-xs text-muted">subscribed</div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </Card>
-
-        <Card title="Start with a screen" action={<Link href="/screener" className="text-sm text-accent hover:underline">Build your own →</Link>}>
-          <ul className="space-y-2">
-            {SCREENS.map((s) => (
-              <li key={s.preset}>
-                <Link href={`/screener?preset=${s.preset}`} className="block rounded-lg border border-line p-3 hover:border-accent">
-                  <div className="text-sm font-medium">{s.title}</div>
-                  <div className="text-xs text-muted mt-0.5">{s.desc}</div>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      </div>
-
-      <Card>
-        <div className="grid sm:grid-cols-3 gap-4 text-sm">
-          <div><Badge variant="accent">1</Badge><p className="mt-2 text-ink-2"><b className="text-ink">Search once.</b> Price, five years of results, valuation and news on a single page.</p></div>
-          <div><Badge variant="accent">2</Badge><p className="mt-2 text-ink-2"><b className="text-ink">See why.</b> Every score lists the exact numbers that moved it up or down.</p></div>
-          <div><Badge variant="accent">3</Badge><p className="mt-2 text-ink-2"><b className="text-ink">Ranges, not tips.</b> Bear, base and bull scenarios with their assumptions shown, never one &quot;target price&quot;.</p></div>
-        </div>
-      </Card>
+      {authEnabled && (
+        <section className="rounded-2xl border border-line bg-surface px-6 py-8 sm:px-10 flex flex-wrap items-center justify-between gap-6">
+          <div>
+            <h2 className="text-xl font-semibold">Start researching in one click</h2>
+            <p className="mt-1 text-sm text-ink-2">Use your Google account. No new password, no forms.</p>
+          </div>
+          <GoogleButton next="/home" />
+        </section>
+      )}
     </div>
   );
 }

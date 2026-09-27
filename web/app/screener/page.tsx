@@ -6,6 +6,8 @@ import { useSearchParams } from "next/navigation";
 import { Card, ErrorBox, Skeleton } from "@/components/ui";
 import { AiStatus, api, ScreenFilter, ScreenResult } from "@/lib/api";
 import { crore, DASH, num, pct, rupees } from "@/lib/format";
+import SignInPrompt from "@/components/SignInPrompt";
+import { useUser } from "@/components/UserContext";
 
 type ScreenSpec = {
   sectors: string[];
@@ -58,6 +60,7 @@ function Screener() {
   const [parsing, setParsing] = useState(false);
   const [spec, setSpec] = useState<ScreenSpec | null>(null);
   const [nlError, setNlError] = useState<string | null>(null);
+  const { user } = useUser();
 
   useEffect(() => {
     api<Record<string, string>>("/api/screener/fields").then(setFields).catch(() => {});
@@ -83,7 +86,7 @@ function Screener() {
     setParsing(true);
     setNlError(null);
     try {
-      const sp = await api<ScreenSpec>("/api/screener/parse", { method: "POST", body: JSON.stringify({ query: q }) });
+      const sp = await api<ScreenSpec>("/api/screener/parse", { method: "POST", body: JSON.stringify({ query: q }) }, { auth: true });
       setSpec(sp);
       setFilters(sp.filters);
       setSectors(sp.sectors);
@@ -111,6 +114,7 @@ function Screener() {
 
       {ai?.tasks.screen.configured && (
         <Card title="Describe your screen in plain English">
+          {ai.sign_in_required && !user ? <SignInPrompt what="describe a screen in plain English" /> : <>
           <form onSubmit={(e) => { e.preventDefault(); describe(nl); }} className="flex gap-2">
             <input value={nl} onChange={(e) => setNl(e.target.value)} placeholder="e.g. profitable IT companies with no debt, cheapest first"
               className="flex-1 min-w-0 bg-surface border border-line rounded-lg px-3 py-2 text-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20" />
@@ -136,6 +140,7 @@ function Screener() {
               <p className="text-xs text-muted">The filters below were filled in from your sentence. Edit anything and press Run screen.</p>
             </div>
           )}
+          </>}
         </Card>
       )}
 
