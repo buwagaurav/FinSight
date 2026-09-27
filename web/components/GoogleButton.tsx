@@ -14,7 +14,7 @@ function GoogleG({ size }: { size: number }) {
   );
 }
 
-function Inner({ big, label }: { big: boolean; label: string }) {
+function Inner({ big, label, compact }: { big: boolean; label: string; compact: boolean }) {
   const { pending } = useFormStatus();
   const icon = big ? 20 : 16;
   return (
@@ -26,6 +26,7 @@ function Inner({ big, label }: { big: boolean; label: string }) {
       type="submit"
       disabled={pending}
       aria-busy={pending}
+      aria-label={compact ? label : undefined}
       className={[
         "group relative inline-flex items-center justify-center rounded-full font-medium",
         // Google's light and dark button styles
@@ -39,7 +40,7 @@ function Inner({ big, label }: { big: boolean; label: string }) {
         "active:shadow-sm motion-safe:active:translate-y-0 motion-safe:active:scale-[0.98]",
         "focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#4285F4]/35",
         "disabled:cursor-wait disabled:opacity-90",
-        big ? "h-12 pl-5 pr-6 text-base gap-3" : "h-9 pl-3.5 pr-4 text-sm gap-2.5",
+        big ? "h-12 pl-5 pr-6 text-base gap-3" : compact ? "h-9 w-9 sm:w-auto sm:pl-3.5 sm:pr-4 text-sm gap-2.5" : "h-9 pl-3.5 pr-4 text-sm gap-2.5",
       ].join(" ")}
     >
       {pending ? (
@@ -49,10 +50,10 @@ function Inner({ big, label }: { big: boolean; label: string }) {
           <GoogleG size={icon} />
         </span>
       )}
-      <span>{pending ? "Connecting to Google…" : label}</span>
+      <span className={compact ? "hidden sm:inline" : undefined}>{pending ? "Connecting to Google…" : label}</span>
       {!pending && (
         <span aria-hidden="true"
-          className="-ml-1 w-0 overflow-hidden opacity-0 transition-all duration-200 ease-out group-hover:ml-0 group-hover:w-4 group-hover:opacity-100 motion-safe:group-hover:translate-x-0.5">
+          className={`${compact ? "hidden sm:inline-block " : ""}-ml-1 w-0 overflow-hidden opacity-0 transition-all duration-200 ease-out group-hover:ml-0 group-hover:w-4 group-hover:opacity-100 motion-safe:group-hover:translate-x-0.5`}>
           →
         </span>
       )}
@@ -62,11 +63,11 @@ function Inner({ big, label }: { big: boolean; label: string }) {
 }
 
 /** Google-branded sign-in button: lifts with a soft glow on hover, presses in on click, shows progress while redirecting. */
-export default function GoogleButton({ next = "/home", size = "lg", label = "Continue with Google" }: { next?: string; size?: "lg" | "sm"; label?: string }) {
+export default function GoogleButton({ next = "/home", size = "lg", label = "Continue with Google", compact = false }: { next?: string; size?: "lg" | "sm"; label?: string; compact?: boolean }) {
   return (
     <form action={signInWithGoogle}>
       <input type="hidden" name="next" value={next} />
-      <Inner big={size === "lg"} label={label} />
+      <Inner big={size === "lg"} label={label} compact={compact} />
     </form>
   );
 }
