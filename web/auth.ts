@@ -13,7 +13,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   session: { strategy: "jwt" },
   pages: { signIn: "/" },
   callbacks: {
-    // expose Google's stable account id (token.sub) so the API can key users on it rather than on email
+    // Without a database adapter Auth.js gives every sign-in a fresh random user id (token.sub), which made each
+    // sign-in look like a new person (empty watchlist, reset AI allowance). Use Google's stable account id instead.
+    jwt({ token, account }) {
+      if (account?.providerAccountId) token.sub = account.providerAccountId;
+      return token;
+    },
+    // expose that id so the API keys users on it rather than on email
     session({ session, token }) {
       if (token.sub && session.user) session.user.id = token.sub;
       return session;

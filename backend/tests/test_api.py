@@ -34,7 +34,7 @@ def test_watchlist_round_trip(client, monkeypatch):
                                                                "profile": {"price": 1.0, "change_pct": 0.0}})
     monkeypatch.setattr(nse, "announcements", lambda s, n: [])
     me = {"authorization": token()}
-    other = {"authorization": token(sub="someone-else")}
+    other = {"authorization": token(sub="someone-else", email="b@example.com")}
 
     assert client.post("/api/watchlist", json={"symbol": "TCS.NS"}, headers=me).json() == {"symbol": "TCS", "watching": True}
     assert client.post("/api/watchlist", json={"symbol": "NOPE"}, headers=me).status_code == 404

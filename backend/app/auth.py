@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS users (
     created_at    timestamptz NOT NULL DEFAULT now(),
     last_seen_at  timestamptz NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS users_email_idx ON users (email);
 CREATE TABLE IF NOT EXISTS ai_usage (
     sub    text NOT NULL,
     day    date NOT NULL,                     -- India date, so allowances reset at midnight IST
@@ -78,7 +79,34 @@ def require_user(authorization: str | None = Header(default=None)) -> dict:
     db.execute("""INSERT INTO users (sub, email, name, picture) VALUES (%(sub)s, %(email)s, %(name)s, %(picture)s)
                   ON CONFLICT (sub) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name,
                   picture = EXCLUDED.picture, last_seen_at = now()""", user)
+    if user["email"]:
+        _adopt_earlier_ids(user)
     return user
+
+
+def _adopt_earlier_ids(user: dict):
+    """Move data saved under earlier ids of the same Google account onto this one.
+
+    Until 2026-09 the website sent a new random id on every sign-in (an Auth.js default), so one person could have
+    several user rows. They now arrive with Google's stable account id; the email (verified by Google, inside a
+    token only our website can sign) links the old rows to it."""
+    with db.conn() as c:
+        old = [r["sub"] for r in c.execute("SELECT sub FROM users WHERE email = %s AND sub <> %s",
+                                           (user["email"], user["sub"])).fetchall()]
+        if not old:
+            return
+        if c.execute("SELECT to_regclass('watchlist') AS t").fetchone()["t"]:
+            c.execute("""INSERT INTO watchlist (sub, symbol, note, added_at, score, label, prev_label, label_changed_at)
+                         SELECT DISTINCT ON (symbol) %s, symbol, note, added_at, score, label, prev_label, label_changed_at
+                         FROM watchlist WHERE sub = ANY(%s) ORDER BY symbol, added_at DESC
+                         ON CONFLICT (sub, symbol) DO NOTHING""", (user["sub"], old))
+            c.execute("DELETE FROM watchlist WHERE sub = ANY(%s)", (old,))
+        # today's AI use carries over, so signing in again doesn't reset the allowance
+        c.execute("""INSERT INTO ai_usage (sub, day, units) SELECT %s, day, sum(units) FROM ai_usage
+                     WHERE sub = ANY(%s) GROUP BY day
+                     ON CONFLICT (sub, day) DO UPDATE SET units = ai_usage.units + EXCLUDED.units""", (user["sub"], old))
+        c.execute("DELETE FROM ai_usage WHERE sub = ANY(%s)", (old,))
+        c.execute("DELETE FROM users WHERE sub = ANY(%s)", (old,))
 
 
 def consume(user: dict, feature: str) -> dict:

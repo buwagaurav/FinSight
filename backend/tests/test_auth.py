@@ -56,3 +56,28 @@ def test_daily_allowance(signed_in, monkeypatch):
     assert e.value.status_code == 429
     assert auth.usage(user) == {"used": 11, "limit": 12}
     assert auth.consume(user, "ask")["used"] == 12
+
+
+def test_earlier_random_ids_of_the_same_account_are_merged(signed_in):
+    from app import watchlist
+    from tests.conftest import add_company
+
+    add_company(signed_in, "TCS", "TCS")
+    add_company(signed_in, "INFY", "Infosys")
+    # rows left by two earlier sign-ins that each got a random id (saved before merging existed)
+    for sub in ("random-1", "random-2"):
+        signed_in.execute("INSERT INTO users (sub, email) VALUES (%s, 'a@example.com')", (sub,))
+    for sub, symbol in [("random-1", "TCS"), ("random-2", "INFY"), ("random-2", "TCS")]:
+        watchlist.add({"sub": sub}, symbol)
+    signed_in.execute("INSERT INTO ai_usage (sub, day, units) VALUES ('random-1', %s, 3)", (auth.datetime.now(auth.IST).date(),))
+    auth.require_user(token(sub="stranger", email="someone@else.com"))
+    watchlist.add({"sub": "stranger"}, "TCS")
+
+    user = auth.require_user(token(sub="google-stable-id"))
+    assert sorted(watchlist.symbols(user)) == ["INFY", "TCS"]
+    assert auth.usage(user)["used"] == 3
+    assert signed_in.fetch_one("SELECT count(*) AS n FROM users WHERE email = 'a@example.com'")["n"] == 1
+    assert watchlist.symbols({"sub": "stranger"}) == ["TCS"]          # other people's lists are untouched
+
+    auth.require_user(token(sub="google-stable-id"))                  # later requests: nothing left to merge
+    assert sorted(watchlist.symbols(user)) == ["INFY", "TCS"]
