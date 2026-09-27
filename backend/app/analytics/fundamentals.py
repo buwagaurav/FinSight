@@ -83,9 +83,12 @@ def build_table(statements: dict) -> list[dict]:
         capital_employed = (r["equity"] or 0) + (r["total_debt"] or 0) if r["equity"] else None
         r["operating_margin_pct"] = _ratio(r["operating_profit"], r["revenue"], 100)
         r["net_margin_pct"] = _ratio(r["net_profit"], r["revenue"], 100)
-        r["roe_pct"] = _ratio(r["net_profit"], avg_equity, 100)
-        r["roce_pct"] = _ratio(r["ebit"], capital_employed, 100)
-        r["debt_to_equity"] = _ratio(r["total_debt"], r["equity"])
+        # With zero or negative equity (losses exceed capital) these ratios are meaningless: a 2,000% ROE or a
+        # negative debt/equity that passes "low debt" filters. Leave them blank; data_checks explains why.
+        positive_equity = bool(r["equity"] and r["equity"] > 0 and (avg_equity or 0) > 0)
+        r["roe_pct"] = _ratio(r["net_profit"], avg_equity, 100) if positive_equity else None
+        r["roce_pct"] = _ratio(r["ebit"], capital_employed, 100) if positive_equity else None
+        r["debt_to_equity"] = _ratio(r["total_debt"], r["equity"]) if positive_equity else None
         r["interest_coverage"] = _ratio(r["ebit"], abs(r["interest_expense"]) if r["interest_expense"] else None)
         r["cash_conversion"] = _ratio(r["operating_cash_flow"], r["net_profit"])
         r["revenue_growth_pct"] = _ratio(r["revenue"] - prev["revenue"], abs(prev["revenue"]), 100) if prev and r["revenue"] is not None and prev["revenue"] else None
@@ -120,6 +123,10 @@ def data_checks(table: list[dict], profile: dict, converted_from: str | None = N
     if computed and reported and abs(computed - reported) / abs(reported) > 0.25:
         checks.append(f"Sources disagree on ROE: {computed:.1f}% computed from annual statements vs "
                       f"{reported:.1f}% trailing-twelve-month figure from the data provider. Verify against the annual report.")
+    negative = [r["year"] for r in table if r.get("equity") is not None and r["equity"] <= 0]
+    if negative:
+        checks.append(f"Shareholder equity is zero or negative in {', '.join(negative)} (accumulated losses exceed capital), "
+                      "so ROE, ROCE and debt-to-equity aren't meaningful and are left blank.")
     if converted_from:
         checks.append(f"Statements are reported in {converted_from} and were converted to ₹ at the "
                       f"exchange rate on each fiscal year-end date, so growth rates include currency movements.")

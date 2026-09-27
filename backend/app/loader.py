@@ -127,6 +127,19 @@ def load_one(symbol: str, need_statements: bool) -> str:
     return "ok"
 
 
+def recompute_metrics() -> int:
+    """Recompute every company's screener metrics from its stored profile and statements (no downloads).
+    Run after a change to how metrics are calculated."""
+    rows = db.fetch_all("SELECT p.symbol, p.data AS profile, s.data AS statements FROM profiles p JOIN statements s USING (symbol)")
+    with db.conn() as c:
+        for r in rows:
+            m = screener.metrics_row(r["profile"], fundamentals.build_table(r["statements"]))
+            cols = [k for k in m if k != "yahoo_symbol"]
+            c.execute(f"UPDATE metrics SET {', '.join(f'{k} = %s' for k in cols)} WHERE symbol = %s",
+                      [*[float(m[k]) if isinstance(m[k], (int, float)) and not isinstance(m[k], bool) else m[k] for k in cols], r["symbol"]])
+    return len(rows)
+
+
 def status() -> dict:
     counts = {r["state"]: r["n"] for r in db.fetch_all("SELECT state, count(*) AS n FROM load_status GROUP BY state")}
     return {"listed": sum(counts.values()), "by_state": counts, **screener.coverage(),
@@ -196,7 +209,11 @@ def main():
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--limit", type=int, help="stop after this many companies")
     ap.add_argument("--status", action="store_true", help="show progress and exit")
+    ap.add_argument("--recompute", action="store_true", help="recompute screener metrics from stored data and exit")
     args = ap.parse_args()
+    if args.recompute:
+        print(f"recomputed metrics for {recompute_metrics():,} companies")
+        return
     if not args.status:
         print(f"NSE list synced: {sync_universe():,} companies")
         print(run(args.minutes, args.workers, args.limit))

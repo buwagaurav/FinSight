@@ -39,6 +39,14 @@ def label(score: float, improving: bool = False) -> str:
     return "Weak"
 
 
+def _latest_year(table, key):
+    """Fiscal year of the value _latest(table, key) returns."""
+    for r in reversed(table):
+        if r.get(key) is not None:
+            return r["year"]
+    return None
+
+
 def _latest(table, key):
     for r in reversed(table):
         if r.get(key) is not None:
@@ -64,7 +72,7 @@ def compute(profile: dict, table: list[dict], growth: dict, technical: dict, pe_
     # --- Fundamentals: quality of returns and earnings ---
     f = Card("Fundamentals")
     _tiered(f, _latest(table, "roe_pct"), [(20, 20), (15, 12), (10, 4), (0, -10), (None, -25)],
-            lambda v: f"Return on equity {v:.1f}% in {table[-1]['year']}")
+            lambda v: f"Return on equity {v:.1f}% in {_latest_year(table, 'roe_pct')}")
     if not financial:
         _tiered(f, _latest(table, "roce_pct"), [(20, 12), (15, 8), (10, 0), (None, -8)],
                 lambda v: f"Return on capital employed {v:.1f}%")
