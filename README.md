@@ -27,6 +27,16 @@ Each feature can use a different model (`FINSIGHT_MODEL_ASSISTANT`, `_REPORT`, `
 DeepSeek, Kimi (Moonshot) or any OpenAI-compatible server. Without a key, everything else works. The web app proxies `/api/*` to `FINSIGHT_API_URL` (default `http://localhost:8010`).
 The first screener run of the day computes metrics for the whole universe (~1 minute); after that it is cached.
 
+## Tests
+
+```bash
+cd backend && ../.venv/bin/pip install -r requirements-dev.txt && ../.venv/bin/python -m pytest
+cd web && npm test
+```
+
+Backend tests run against a throwaway PostgreSQL and stub out Yahoo, NSE and the AI providers, so they are free,
+offline and never touch your data. GitHub Actions runs both suites on every push.
+
 ## How it is built
 
 | Layer | What it does |

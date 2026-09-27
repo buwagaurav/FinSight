@@ -1,5 +1,6 @@
 import os
 import threading
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -15,7 +16,17 @@ from app import auth, gmp, loader, research, screener, watchlist
 from app.ai import assistant, filings, llm, report, screen_nl
 from app.providers import nse, yahoo
 
-app = FastAPI(title="FinSight API", version="0.1.0")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Keep the database filling up and fresh while the API runs. Disable with FINSIGHT_BACKGROUND_LOADER=0."""
+    stop = threading.Event()
+    if os.environ.get("FINSIGHT_BACKGROUND_LOADER", "1") != "0":
+        threading.Thread(target=loader.run_forever, args=(stop,), daemon=True).start()
+    yield
+    stop.set()
+
+
+app = FastAPI(title="FinSight API", version="0.1.0", lifespan=lifespan)
 # Websites allowed to call this API: comma-separated FINSIGHT_CORS_ORIGINS, e.g. "https://finsight.netlify.app".
 # FINSIGHT_CORS_ORIGIN_REGEX can also allow Netlify deploy previews, e.g. "https://.*--finsight\.netlify\.app".
 app.add_middleware(
@@ -54,20 +65,6 @@ def health_sources():
         "database": check(lambda: screener.coverage()),
     }
 
-
-_loader_stop = threading.Event()
-
-
-@app.on_event("startup")
-def start_background_loader():
-    """Keep the database filling up and fresh while the API runs. Disable with FINSIGHT_BACKGROUND_LOADER=0."""
-    if os.environ.get("FINSIGHT_BACKGROUND_LOADER", "1") != "0":
-        threading.Thread(target=loader.run_forever, args=(_loader_stop,), daemon=True).start()
-
-
-@app.on_event("shutdown")
-def stop_background_loader():
-    _loader_stop.set()
 
 
 @app.get("/api/loader/status")

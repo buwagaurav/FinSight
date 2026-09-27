@@ -180,7 +180,10 @@ export async function api<T>(path: string, init?: RequestInit, opts?: { auth?: b
   });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
-    throw new Error(body?.detail ?? `Request failed (${res.status})`);
+    // FastAPI sends a string for our own errors but a list of field problems for invalid input (422)
+    const detail = typeof body?.detail === "string" ? body.detail
+      : Array.isArray(body?.detail) && body.detail[0]?.msg ? `Invalid request: ${body.detail[0].msg}` : null;
+    throw new Error(detail ?? `Request failed (${res.status})`);
   }
   return res.json();
 }

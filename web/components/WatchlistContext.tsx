@@ -25,10 +25,21 @@ export function WatchlistProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!active) { setSymbols(new Set()); setReady(false); return; }
-    api<string[]>("/api/watchlist/symbols", undefined, { auth: true })
-      .then((s) => { setSymbols(new Set(s)); setReady(true); })
-      .catch(() => setReady(false));
+    // The free API server can take a minute to wake up, so retry instead of leaving every star disabled
+    let cancelled = false, timer: ReturnType<typeof setTimeout>;
+    const load = (attempt: number) =>
+      api<string[]>("/api/watchlist/symbols", undefined, { auth: true })
+        .then((s) => { if (!cancelled) { setSymbols(new Set(s)); setReady(true); } })
+        .catch(() => { if (!cancelled && attempt < 4) timer = setTimeout(() => load(attempt + 1), 5000 * (attempt + 1)); });
+    load(0);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [active]);
+
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(null), 6000);
+    return () => clearTimeout(t);
+  }, [error]);
 
   const toggle = useCallback(async (symbol: string) => {
     const s = base(symbol);
@@ -48,6 +59,12 @@ export function WatchlistProvider({ children }: { children: ReactNode }) {
   return (
     <WatchCtx.Provider value={{ ready, watching: (s) => symbols.has(base(s)), toggle, error, version }}>
       {children}
+      {error && (
+        <div role="alert" className="fixed inset-x-4 bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] z-50 mx-auto flex max-w-md items-start gap-3 rounded-xl border border-bad/40 bg-surface p-3 text-sm shadow-lg">
+          <span className="flex-1">{error}</span>
+          <button type="button" onClick={() => setError(null)} aria-label="Dismiss" className="text-muted hover:text-ink">✕</button>
+        </div>
+      )}
     </WatchCtx.Provider>
   );
 }

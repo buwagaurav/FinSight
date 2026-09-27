@@ -14,6 +14,8 @@ from app.providers import nse, yahoo
 
 LIMIT = 50
 LABEL_CHANGE_DAYS = 7   # how long a "label changed" badge stays visible
+VISIT_GAP_MINUTES = 30  # reloads closer together than this belong to the same visit
+IST = timezone(timedelta(hours=5, minutes=30))
 # "Tata Consultancy Services Limited has informed the Exchange regarding ..." -> "..."
 _BOILERPLATE = re.compile(r"^.{0,120}?\bhas informed (?:the )?(?:Exchange )?(?:about |regarding |that )?", re.I)
 
@@ -30,6 +32,7 @@ CREATE TABLE IF NOT EXISTS watchlist (
     PRIMARY KEY (sub, symbol)
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS watchlist_seen_at timestamptz;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS watchlist_prev_seen_at timestamptz;
 """
 _schema_ready = False
 
@@ -92,9 +95,16 @@ def listing(user: dict) -> dict:
         LEFT JOIN metrics m ON m.symbol = w.symbol
         LEFT JOIN profiles p ON p.symbol = w.symbol
         WHERE w.sub = %s ORDER BY w.added_at""", (user["sub"],))
-    seen = db.fetch_one("SELECT watchlist_seen_at FROM users WHERE sub = %s", (user["sub"],))
-    previous_visit = seen["watchlist_seen_at"] if seen else None
-    db.execute("UPDATE users SET watchlist_seen_at = now() WHERE sub = %s", (user["sub"],))
+    # The page reloads the list whenever a star changes, so "since your last visit" must survive reloads: a new
+    # visit starts only after VISIT_GAP_MINUTES without one. (SET expressions see the row's old values.)
+    seen = db.fetch_one(f"""UPDATE users SET
+                               watchlist_prev_seen_at = CASE
+                                   WHEN watchlist_seen_at IS NULL
+                                     OR watchlist_seen_at < now() - interval '{VISIT_GAP_MINUTES} minutes'
+                                   THEN watchlist_seen_at ELSE watchlist_prev_seen_at END,
+                               watchlist_seen_at = now()
+                           WHERE sub = %s RETURNING watchlist_prev_seen_at""", (user["sub"],))
+    previous_visit = seen["watchlist_prev_seen_at"] if seen else None
 
     def num(v):
         return float(v) if v not in (None, "null") else None
@@ -117,6 +127,21 @@ def listing(user: dict) -> dict:
         "label_changed_at": r["label_changed_at"].isoformat() if r["label_changed_at"] else None,
     } for r in rows]
     return {"items": items, "previous_visit": previous_visit.isoformat() if previous_visit else None, "limit": LIMIT}
+
+
+def _aware(value: str) -> datetime:
+    t = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return t if t.tzinfo else t.replace(tzinfo=IST)   # NSE times are Indian time without an offset
+
+
+def _is_after(published: str | None, since: str | None) -> bool:
+    """Whether a filing came out after the user's previous visit. Bad or missing dates never hide the filing."""
+    if not published or not since:
+        return False
+    try:
+        return _aware(published) > _aware(since)
+    except ValueError:
+        return False
 
 
 def details(user: dict, symbol: str, since: str | None) -> dict:
@@ -153,9 +178,7 @@ def details(user: dict, symbol: str, since: str | None) -> dict:
         if latest:
             out["filing"] = {"category": latest["category"], "text": _BOILERPLATE.sub("", latest["text"]).strip(" -:")[:160], "published": latest["published"],
                              "url": latest["pdf_url"]}
-            if since and latest["published"]:
-                published = datetime.fromisoformat(latest["published"]).replace(tzinfo=timezone(timedelta(hours=5, minutes=30)))
-                out["filing"]["new"] = published > datetime.fromisoformat(since)
+            out["filing"]["new"] = _is_after(latest["published"], since)
     except Exception:
         out["filing_error"] = "Filings unavailable right now"
     return out

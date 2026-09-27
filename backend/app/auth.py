@@ -65,14 +65,14 @@ def require_user(authorization: str | None = Header(default=None)) -> dict:
     if not secret:
         return LOCAL_USER
     if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(401, "Sign in with Google to use AI features.")
+        raise HTTPException(401, "Sign in with Google to continue.")
     try:
         claims = jwt.decode(authorization[7:], secret, algorithms=["HS256"], audience=AUDIENCE, issuer=ISSUER,
                             options={"require": ["exp", "sub"]})
     except jwt.ExpiredSignatureError:
         raise HTTPException(401, "Your session expired. Refresh the page and try again.")
     except jwt.InvalidTokenError:
-        raise HTTPException(401, "Sign in with Google to use AI features.")
+        raise HTTPException(401, "Sign in with Google to continue.")
     user = {"sub": claims["sub"], "email": claims.get("email"), "name": claims.get("name"), "picture": claims.get("picture")}
     _ensure_schema()
     db.execute("""INSERT INTO users (sub, email, name, picture) VALUES (%(sub)s, %(email)s, %(name)s, %(picture)s)
