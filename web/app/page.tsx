@@ -94,6 +94,13 @@ export default async function Landing() {
           <p className="mt-4 text-sm text-muted">
             {authEnabled ? "Free. One click with your Google account." : "Free and open. Sign-in isn't configured on this server yet."}
           </p>
+          {authEnabled && (
+            <p className="mt-1 text-xs text-muted">
+              By continuing, you agree to our{" "}
+              <Link href="/terms" className="underline underline-offset-2 hover:text-ink">Terms of Use</Link> and{" "}
+              <Link href="/privacy" className="underline underline-offset-2 hover:text-ink">Privacy Policy</Link>.
+            </p>
+          )}
           <dl className="mt-8 flex flex-wrap gap-x-8 gap-y-3 text-sm">
             <div><dt className="text-muted text-xs">NSE companies</dt><dd className="font-semibold tabular-nums">2,552</dd></div>
             <div><dt className="text-muted text-xs">Annual reports searchable</dt><dd className="font-semibold tabular-nums">48 of the top 50</dd></div>
