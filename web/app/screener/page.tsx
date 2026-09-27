@@ -7,6 +7,7 @@ import { Card, ErrorBox, Skeleton } from "@/components/ui";
 import { AiStatus, api, ScreenFilter, ScreenResult } from "@/lib/api";
 import { crore, DASH, num, pct, rupees } from "@/lib/format";
 import SignInPrompt from "@/components/SignInPrompt";
+import StarButton from "@/components/StarButton";
 import { useUser } from "@/components/UserContext";
 
 type ScreenSpec = {
@@ -229,8 +230,13 @@ function Screener() {
                 {result.rows.map((r) => (
                   <tr key={r.symbol} className="group">
                     <td className="sticky left-0 z-[5] bg-surface group-hover:bg-surface-2 py-2 px-4 border-b border-line/60 shadow-[inset_-1px_0_0_var(--line)] max-w-[240px]">
-                      <Link href={`/stock/${r.symbol}`} className="font-medium hover:text-accent block truncate" title={r.name}>{r.name}</Link>
-                      <div className="text-xs text-muted truncate">{r.symbol.split(".")[0]}{r.sector ? ` · ${r.sector}` : ""}</div>
+                      <div className="flex items-center gap-1.5">
+                        <StarButton symbol={r.symbol} compact />
+                        <div className="min-w-0">
+                          <Link href={`/stock/${r.symbol}`} className="font-medium hover:text-accent block truncate" title={r.name}>{r.name}</Link>
+                          <div className="text-xs text-muted truncate">{r.symbol.split(".")[0]}{r.sector ? ` · ${r.sector}` : ""}</div>
+                        </div>
+                      </div>
                     </td>
                     <td className="text-right py-2 px-3 border-b border-line/60 group-hover:bg-surface-2">{rupees(r.price as number | null, 0)}</td>
                     {COLUMNS.map((c) => (

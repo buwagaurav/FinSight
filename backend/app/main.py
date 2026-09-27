@@ -11,7 +11,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from app import auth, gmp, loader, research, screener
+from app import auth, gmp, loader, research, screener, watchlist
 from app.ai import assistant, filings, llm, report, screen_nl
 from app.providers import nse, yahoo
 
@@ -257,3 +257,42 @@ def latest_report(symbol: str):
     if not saved:
         raise HTTPException(404, "No report generated yet")
     return saved
+
+
+class WatchRequest(BaseModel):
+    symbol: str = Field(min_length=1, max_length=40)
+    note: str | None = Field(default=None, max_length=200)
+
+
+class NoteRequest(BaseModel):
+    note: str = Field(max_length=200)
+
+
+@app.get("/api/watchlist")
+def get_watchlist(user: dict = Depends(auth.require_user)):
+    return watchlist.listing(user)
+
+
+@app.get("/api/watchlist/symbols")
+def watchlist_symbols(user: dict = Depends(auth.require_user)):
+    return watchlist.symbols(user)
+
+
+@app.post("/api/watchlist")
+def add_to_watchlist(req: WatchRequest, user: dict = Depends(auth.require_user)):
+    return watchlist.add(user, req.symbol, req.note)
+
+
+@app.delete("/api/watchlist/{symbol}")
+def remove_from_watchlist(symbol: str, user: dict = Depends(auth.require_user)):
+    return watchlist.remove(user, symbol)
+
+
+@app.patch("/api/watchlist/{symbol}")
+def update_watchlist_note(symbol: str, req: NoteRequest, user: dict = Depends(auth.require_user)):
+    return watchlist.set_note(user, symbol, req.note)
+
+
+@app.get("/api/watchlist/{symbol}/details")
+def watchlist_details(symbol: str, since: str | None = None, user: dict = Depends(auth.require_user)):
+    return watchlist.details(user, symbol, since)

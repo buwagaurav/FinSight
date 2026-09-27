@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import SearchBox from "@/components/SearchBox";
+import WatchlistPanel from "@/components/WatchlistPanel";
 import { Badge, Card, InfoTip, Skeleton } from "@/components/ui";
 import { api, Ipo } from "@/lib/api";
 import { date, rupees } from "@/lib/format";
@@ -51,6 +52,8 @@ export default function Home() {
           ))}
         </div>
       </section>
+
+      <WatchlistPanel />
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2" title={<>IPOs open now <InfoTip term="Subscription" /></>}

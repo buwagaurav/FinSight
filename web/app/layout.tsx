@@ -3,6 +3,7 @@ import { Geist } from "next/font/google";
 import Link from "next/link";
 import Nav from "@/components/Nav";
 import { UserProvider } from "@/components/UserContext";
+import { WatchlistProvider } from "@/components/WatchlistContext";
 import { authEnabled, currentUser } from "@/auth";
 import "./globals.css";
 
@@ -19,6 +20,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col font-sans">
         <UserProvider user={user} authEnabled={authEnabled}>
+        <WatchlistProvider>
         <Nav />
         <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-6">{children}</main>
         <footer className="border-t border-line text-xs text-muted">
@@ -33,6 +35,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
             </nav>
           </div>
         </footer>
+        </WatchlistProvider>
         </UserProvider>
       </body>
     </html>

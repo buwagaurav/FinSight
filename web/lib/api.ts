@@ -245,3 +245,17 @@ export type ReportJob = {
   result: ReportResult | null;
   steps: { key: string; label: string; status: "pending" | "running" | "done" | "retry" }[];
 };
+
+export type WatchItem = {
+  symbol: string; base: string; name: string; sector: string | null;
+  price: number | null; change_pct: number | null; week52_low: number | null; week52_high: number | null;
+  market_cap_cr: number | null; pe: number | null; roe_pct: number | null;
+  note: string | null; added_at: string;
+  score: number | null; label: string | null; prev_label: string | null; label_changed_at: string | null;
+};
+export type Watchlist = { items: WatchItem[]; previous_visit: string | null; limit: number };
+export type WatchDetails = {
+  symbol: string; score?: number | null; label?: string; prev_label?: string | null; price?: number | null; change_pct?: number | null;
+  filing?: { category: string; text: string; published: string | null; url: string | null; new?: boolean };
+  score_error?: string; filing_error?: string;
+};

@@ -1,6 +1,7 @@
 import { Company } from "@/lib/api";
 import { crore, num, pct, rupees } from "@/lib/format";
 import { Stat } from "@/components/ui";
+import StarButton from "@/components/StarButton";
 
 function RangeBar({ low, high, price }: { low: number; high: number; price: number }) {
   const pos = Math.min(100, Math.max(0, ((price - low) / (high - low || 1)) * 100));
@@ -23,7 +24,10 @@ export default function Header({ c }: { c: Company }) {
     <section className="bg-surface border border-line rounded-xl p-4 sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight">{p.name}</h1>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-xl sm:text-2xl font-semibold tracking-tight">{p.name}</h1>
+            <StarButton symbol={p.symbol} />
+          </div>
           <div className="text-sm text-muted mt-1">
             {p.symbol.split(".")[0]} · {p.exchange}{p.sector && ` · ${p.sector}`}{p.industry && ` · ${p.industry}`}
           </div>
