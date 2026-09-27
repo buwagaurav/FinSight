@@ -86,15 +86,6 @@ export default async function Landing() {
         </div>
       </section>
 
-      {authEnabled && (
-        <section className="rounded-2xl border border-line bg-surface px-6 py-8 sm:px-10 flex flex-wrap items-center justify-between gap-6">
-          <div>
-            <h2 className="text-xl font-semibold">Start researching in one click</h2>
-            <p className="mt-1 text-sm text-ink-2">Use your Google account. No new password, no forms.</p>
-          </div>
-          <GoogleButton next="/home" />
-        </section>
-      )}
     </div>
   );
 }
