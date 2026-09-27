@@ -4,7 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import SearchBox from "./SearchBox";
 import { useUser } from "./UserContext";
-import { signInWithGoogle, signOutAction } from "@/app/actions";
+import { signOutAction } from "@/app/actions";
+import GoogleButton from "./GoogleButton";
 
 const LINKS = [
   { href: "/home", label: "Home" },
@@ -49,10 +50,7 @@ export default function Nav() {
                 </form>
               </>
             ) : (
-              <form action={signInWithGoogle}>
-                <input type="hidden" name="next" value={landing ? "/home" : path} />
-                <button className="text-sm px-3 py-1.5 rounded-lg bg-accent text-white font-medium hover:opacity-90">Sign in</button>
-              </form>
+              <GoogleButton next={landing ? "/home" : path} size="sm" />
             )}
           </div>
         )}

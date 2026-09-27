@@ -33,13 +33,10 @@ export default async function Landing() {
                 Explore FinSight
               </Link>
             )}
-            <Link href="/home" className="text-sm font-medium text-ink-2 hover:text-ink underline-offset-4 hover:underline">
-              Explore without an account →
-            </Link>
           </div>
           <p className="mt-4 text-sm text-muted">
             {authEnabled
-              ? "Free. Research is open to everyone; signing in unlocks the AI assistant, filing summaries and reports."
+              ? "Free. One click with your Google account."
               : "Free and open. Sign-in isn't configured on this server yet."}
           </p>
         </div>
