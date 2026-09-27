@@ -4,6 +4,9 @@ import Google from "next-auth/providers/google";
 // Sign-in is on when these are set (Netlify environment / web/.env.local); otherwise the site runs without accounts.
 export const authEnabled = Boolean(process.env.AUTH_SECRET && process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET);
 
+// Pin sign-in to the public address (see FINSIGHT_SITE_URL in next.config.ts). Auth.js reads AUTH_URL per request.
+if (!process.env.AUTH_URL && process.env.FINSIGHT_SITE_URL) process.env.AUTH_URL = process.env.FINSIGHT_SITE_URL;
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [Google], // reads AUTH_GOOGLE_ID and AUTH_GOOGLE_SECRET
   trustHost: true,     // required outside Vercel (Netlify, localhost)

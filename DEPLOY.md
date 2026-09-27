@@ -56,13 +56,13 @@ Research pages stay public; signing in with Google unlocks the AI features, with
 3. **Audience > Publish app** (switch from "Testing" to "In production"). FinSight only asks for name, email and
    profile picture, so Google doesn't require a review; while in Testing, only listed test users can sign in.
 4. Generate two random secrets: run `openssl rand -base64 32` twice.
-5. **Netlify** environment variables: `AUTH_URL` (your site address, e.g. `https://finsight-in.netlify.app`),
-   `AUTH_SECRET` (secret 1), `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `FINSIGHT_API_JWT_SECRET` (secret 2). Redeploy.
-   `AUTH_URL` is required: without it the sign-in library sees Netlify's internal deploy address and Google rejects
-   the sign-in with `redirect_uri_mismatch`.
+5. **Netlify** environment variables: `AUTH_SECRET` (secret 1), `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`,
+   `FINSIGHT_API_JWT_SECRET` (secret 2). Redeploy.
+   Sign-in always uses the site's main address (`https://<site>.netlify.app`, or your custom domain), taken from
+   Netlify at build time, never Netlify's internal `main--<site>` address. Set `AUTH_URL` only to override it.
 6. **Render** environment: `FINSIGHT_API_JWT_SECRET` (the same secret 2). Save; Render redeploys.
 
-If you rename the Netlify site, update `AUTH_URL`, both Google URLs and `FINSIGHT_CORS_ORIGINS`.
+If you rename the Netlify site, redeploy and update both Google URLs and `FINSIGHT_CORS_ORIGINS`.
 
 ## Known limits
 - **Cold starts:** the free API sleeps when idle; the first visit afterwards is slow.
