@@ -259,6 +259,7 @@ export type WatchItem = {
 export type Watchlist = { items: WatchItem[]; previous_visit: string | null; limit: number };
 export type WatchDetails = {
   symbol: string; score?: number | null; label?: string; prev_label?: string | null; price?: number | null; change_pct?: number | null;
+  week52_low?: number | null; week52_high?: number | null;
   filing?: { category: string; text: string; published: string | null; url: string | null; new?: boolean };
   score_error?: string; filing_error?: string;
 };

@@ -4,7 +4,8 @@ import { useState } from "react";
 import Chart, { baseOption } from "@/components/Chart";
 import { Card, InfoTip, LabelBadge, SourceLink, Stat } from "@/components/ui";
 import { Company } from "@/lib/api";
-import { pct, rupees } from "@/lib/format";
+import { money, pct } from "@/lib/format";
+import { useCurrency } from "@/components/CurrencyContext";
 
 const RANGES = [{ label: "1Y", days: 365 }, { label: "3Y", days: 3 * 365 }, { label: "5Y", days: 5 * 365 }];
 
@@ -14,6 +15,7 @@ export default function Overview({ c }: { c: Company }) {
   const prices = c.prices.filter((p) => p.date >= cutoff);
   const change = prices.length > 1 ? (prices.at(-1)!.close / prices[0].close - 1) * 100 : null;
   const t = c.technical;
+  const cur = useCurrency();
   const trendLabel = t.trend === "Uptrend" ? "Improving" : t.trend === "Downtrend" ? "Weak" : "Stable";
 
   return (
@@ -32,7 +34,7 @@ export default function Overview({ c }: { c: Company }) {
           return {
             ...base,
             legend: { show: false },
-            tooltip: { ...base.tooltip, valueFormatter: (v) => rupees(Number(v)) },
+            tooltip: { ...base.tooltip, valueFormatter: (v) => money(Number(v), cur) },
             xAxis: { type: "time", axisLine: { lineStyle: { color: k.line } }, axisLabel: { color: k.muted, fontSize: 11 }, splitLine: { show: false } },
             yAxis: { ...base.yAxis, scale: true } as never,
             series: [{
@@ -52,7 +54,7 @@ export default function Overview({ c }: { c: Company }) {
           <Stat label="1-year return" value={pct(t.return_1y_pct, 1, true)} />
           <Stat label="Volatility" term="Volatility" value={pct(t.volatility_1y_pct, 0)} />
           <Stat label="Max drawdown" term="Drawdown" value={pct(t.max_drawdown_1y_pct, 0)} />
-          <Stat label="200-day avg" value={rupees(t.sma200, 0)} />
+          <Stat label="200-day avg" value={money(t.sma200, cur, 0)} />
         </div>
         <p className="text-xs text-muted mt-4">Trend describes the past, not the future. It is not included in the overall score.</p>
       </Card>

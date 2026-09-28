@@ -38,3 +38,35 @@ export function tone(label: string): "good" | "warn" | "bad" | "neutral" {
   if (label === "Weak") return "bad";
   return "neutral";
 }
+
+// ---------------------------------------------------------------- Indian (₹) and US ($) listings
+
+export type Currency = "INR" | "USD";
+
+/** US listings end in .US (AAPL.US); everything else is an Indian listing. */
+export const currencyOf = (symbol: string | null | undefined): Currency => (symbol?.toUpperCase().endsWith(".US") ? "USD" : "INR");
+
+const usd = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+const usd2 = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** A price or per-share amount in the listing's currency. */
+export function money(v: number | null | undefined, cur: Currency = "INR", decimals = 2): string {
+  if (cur === "INR") return rupees(v, decimals);
+  if (v == null) return DASH;
+  return (v < 0 ? "-$" : "$") + (decimals ? usd2.format(Math.abs(v)) : usd.format(Math.abs(v)));
+}
+
+/** A company-level amount: ₹ crore for Indian companies, $ millions for US ones (as the API sends them). */
+export function amount(v: number | null | undefined, cur: Currency = "INR"): string {
+  if (cur === "INR") return crore(v);
+  if (v == null) return DASH;
+  const a = Math.abs(v), sign = v < 0 ? "-" : "";
+  if (a >= 1e6) return `${sign}$${(a / 1e6).toFixed(2)} T`;
+  if (a >= 1e3) return `${sign}$${(a / 1e3).toFixed(1)} B`;
+  return `${sign}$${usd.format(a)} M`;
+}
+
+/** Plain number in the unit of a statements table (grouped the Indian or US way). */
+export const tableNumber = (v: number, cur: Currency = "INR") => (cur === "USD" ? usd : inr).format(v);
+export const amountUnit = (cur: Currency) => (cur === "USD" ? "$ M" : "₹ Cr");
+export const currencySign = (cur: Currency) => (cur === "USD" ? "$" : "₹");

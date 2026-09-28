@@ -55,6 +55,8 @@ def cagr(first, last, years: int) -> float | None:
 
 
 def build_table(statements: dict) -> list[dict]:
+    """Yearly table in display units: ₹ crore by default, or per `statements["scale"]` (US: $ millions)."""
+    scale = statements.get("scale") or CRORE
     years = sorted(set(statements["income"]) | set(statements["balance"]) | set(statements["cashflow"]))
     table = []
     for fy in years:
@@ -64,13 +66,13 @@ def build_table(statements: dict) -> list[dict]:
             row.setdefault("period_end", src.get("period_end"))
             for name, keys in items.items():
                 v = _pick(src, keys)
-                row[name] = v if v is None or name in RAW_UNITS else v / CRORE
+                row[name] = v if v is None or name in RAW_UNITS else v / scale
         if row["revenue"] is None and row["net_profit"] is None:
             continue  # Yahoo sometimes returns an empty oldest column
         # Reported EPS is not always restated for later bonus issues/splits (e.g. HDFC Bank FY23),
         # while the average share count is. Deriving EPS keeps it comparable with adjusted prices.
         if row["net_profit"] is not None and row["basic_shares"]:
-            row["eps"] = row["net_profit"] * CRORE / row.pop("basic_shares")
+            row["eps"] = row["net_profit"] * scale / row.pop("basic_shares")
         else:
             row.pop("basic_shares")
             row["eps"] = row["reported_eps"]
@@ -116,7 +118,11 @@ def data_checks(table: list[dict], profile: dict, converted_from: str | None = N
     """Cross-checks that tell the user when the numbers deserve extra scrutiny."""
     checks = []
     for prev, r in zip(table, table[1:]):
-        if prev.get("equity") and r.get("equity") and r["equity"] / prev["equity"] > 1.6:
+        # a big jump in equity that the year's own profit can't explain points to a merger or share issue
+        # (fast-growing companies such as NVIDIA grow equity quickly from retained profit alone)
+        retained = max(r.get("net_profit") or 0, 0)
+        if (prev.get("equity") and prev["equity"] > 0 and r.get("equity") and r["equity"] / prev["equity"] > 1.6
+                and r["equity"] - prev["equity"] > 1.5 * retained):
             checks.append(f"Equity rose {r['equity'] / prev['equity']:.1f}x in {r['year']} (merger, acquisition or "
                           f"capital raise?). Comparisons across {prev['year']}→{r['year']} may not be like-for-like.")
     computed, reported = (table[-1].get("roe_pct") if table else None), profile.get("roe_ttm_pct")

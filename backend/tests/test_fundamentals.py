@@ -68,3 +68,16 @@ def test_data_checks_flags_equity_jump_roe_disagreement_and_short_history():
     assert "Sources disagree on ROE" in checks
     assert "converted to ₹" in checks
     assert "Only 2 years" in checks
+
+
+def test_equity_growth_from_retained_profit_is_not_flagged():
+    # equity doubles each year, fully explained by that year's profit: a fast grower, not a merger
+    table = f.build_table(statements({"FY24": (1000, 600, 500, 500, 0, 500), "FY25": (2000, 1200, 1000, 1400, 0, 900)}))
+    assert not any("Equity rose" in c for c in f.data_checks(table, {}))
+
+
+def test_technicals_use_the_listing_currency():
+    from app.analytics import technicals
+    history = [{"date": f"2025-{1 + i // 28:02d}-{1 + i % 28:02d}", "close": 100.0 + i} for i in range(250)]
+    assert "($" in technicals.summarize(history, "$")["reasons"][0]
+    assert "(₹" in technicals.summarize(history)["reasons"][0]

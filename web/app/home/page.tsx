@@ -19,6 +19,14 @@ const POPULAR = [
   { symbol: "TATASTEEL.NS", name: "Tata Steel" },
 ];
 
+const POPULAR_US = [
+  { symbol: "AAPL.US", name: "Apple" },
+  { symbol: "NVDA.US", name: "NVIDIA" },
+  { symbol: "MSFT.US", name: "Microsoft" },
+  { symbol: "GOOGL.US", name: "Alphabet" },
+  { symbol: "AMZN.US", name: "Amazon" },
+];
+
 const SCREENS = [
   { title: "Quality compounders", desc: "ROE above 18%, low debt, profit growing 10%+ a year", preset: "quality" },
   { title: "Reasonably priced growth", desc: "Profit growth above 12% with P/E under 30", preset: "garp" },
@@ -45,6 +53,15 @@ export default function Home() {
         <div className="mt-6 text-left"><SearchBox large autoFocus /></div>
         <div className="mt-4 flex flex-wrap justify-center gap-2">
           {POPULAR.map((p) => (
+            <Link key={p.symbol} href={`/stock/${p.symbol}`}
+              className="text-sm px-3 py-1.5 rounded-full border border-line bg-surface hover:border-accent hover:text-accent">
+              {p.name}
+            </Link>
+          ))}
+        </div>
+        <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+          <span className="text-xs font-medium text-muted">US</span>
+          {POPULAR_US.map((p) => (
             <Link key={p.symbol} href={`/stock/${p.symbol}`}
               className="text-sm px-3 py-1.5 rounded-full border border-line bg-surface hover:border-accent hover:text-accent">
               {p.name}

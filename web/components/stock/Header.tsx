@@ -1,9 +1,11 @@
 import { Company } from "@/lib/api";
-import { crore, num, pct, rupees } from "@/lib/format";
+import { amount, money, num, pct } from "@/lib/format";
+import { useCurrency } from "@/components/CurrencyContext";
 import { Stat } from "@/components/ui";
 import StarButton from "@/components/StarButton";
 
 function RangeBar({ low, high, price }: { low: number; high: number; price: number }) {
+  const cur = useCurrency();
   const pos = Math.min(100, Math.max(0, ((price - low) / (high - low || 1)) * 100));
   return (
     <div className="w-full">
@@ -11,7 +13,7 @@ function RangeBar({ low, high, price }: { low: number; high: number; price: numb
         <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-accent ring-2 ring-surface" style={{ left: `${pos}%` }} />
       </div>
       <div className="flex justify-between text-xs text-muted mt-1.5 tabular">
-        <span>{rupees(low, 0)}</span><span>52-week range</span><span>{rupees(high, 0)}</span>
+        <span>{money(low, cur, 0)}</span><span>52-week range</span><span>{money(high, cur, 0)}</span>
       </div>
     </div>
   );
@@ -19,6 +21,7 @@ function RangeBar({ low, high, price }: { low: number; high: number; price: numb
 
 export default function Header({ c }: { c: Company }) {
   const p = c.profile;
+  const cur = useCurrency();
   const up = (p.change_pct ?? 0) >= 0;
   return (
     <section className="bg-surface border border-line rounded-xl p-4 sm:p-5">
@@ -33,7 +36,7 @@ export default function Header({ c }: { c: Company }) {
           </div>
         </div>
         <div className="text-right">
-          <div className="text-2xl sm:text-3xl font-semibold">{rupees(p.price)}</div>
+          <div className="text-2xl sm:text-3xl font-semibold">{money(p.price, cur)}</div>
           {p.change_pct != null && (
             <div className={`text-sm font-medium ${up ? "text-good" : "text-bad"}`}>
               {up ? "▲" : "▼"} {pct(Math.abs(p.change_pct), 2)} today
@@ -45,7 +48,7 @@ export default function Header({ c }: { c: Company }) {
         <div className="mt-4 max-w-md"><RangeBar low={p.week52_low} high={p.week52_high} price={p.price} /></div>
       )}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mt-5 pt-4 border-t border-line">
-        <Stat label="Market cap" term="Market cap" value={crore(p.market_cap_cr)} />
+        <Stat label="Market cap" term="Market cap" value={amount(p.market_cap_cr, cur)} />
         <Stat label="P/E" term="P/E" value={num(p.pe)} />
         <Stat label="P/B" term="P/B" value={num(p.pb)} />
         <Stat label="ROE (TTM)" term="ROE" value={pct(p.roe_ttm_pct)} />

@@ -6,14 +6,14 @@ import { Card, LabelBadge, Skeleton } from "./ui";
 import { useUser } from "./UserContext";
 import { useWatchlist } from "./WatchlistContext";
 import { api, WatchDetails, Watchlist } from "@/lib/api";
-import { date, pct, rupees } from "@/lib/format";
+import { Currency, currencyOf, date, money, pct } from "@/lib/format";
 
 const RANK: Record<string, number> = { Weak: 0, Watchlist: 1, Stable: 2, Improving: 3, Strong: 4 };
 
-function RangeDot({ low, high, price }: { low: number; high: number; price: number }) {
+function RangeDot({ low, high, price, cur }: { low: number; high: number; price: number; cur: Currency }) {
   const pos = Math.min(100, Math.max(0, ((price - low) / (high - low || 1)) * 100));
   return (
-    <div className="w-24" title={`52-week range ${rupees(low, 0)} – ${rupees(high, 0)}`}>
+    <div className="w-24" title={`52-week range ${money(low, cur, 0)} – ${money(high, cur, 0)}`}>
       <div className="relative h-1 rounded-full bg-surface-2">
         <div className="absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent ring-2 ring-surface" style={{ left: `${pos}%` }} />
       </div>
@@ -91,7 +91,7 @@ export default function WatchlistPanel() {
           <p className="font-medium">Follow the stocks you care about</p>
           <p className="mt-1 text-sm text-ink-2">Tap <span className="text-[#f5b50a]">☆ Watch</span> on any company or screener result. Your stocks show up here with today&apos;s move, score changes and new filings.</p>
           <div className="mt-4 flex flex-wrap justify-center gap-2 text-sm">
-            {[["TCS.NS", "TCS"], ["RELIANCE.NS", "Reliance"], ["HDFCBANK.NS", "HDFC Bank"], ["INFY.NS", "Infosys"]].map(([s, n]) => (
+            {[["TCS.NS", "TCS"], ["RELIANCE.NS", "Reliance"], ["HDFCBANK.NS", "HDFC Bank"], ["AAPL.US", "Apple"], ["NVDA.US", "NVIDIA"]].map(([s, n]) => (
               <Link key={s} href={`/stock/${s}`} className="rounded-full border border-line px-3 py-1 hover:border-accent hover:text-accent">{n}</Link>
             ))}
           </div>
@@ -113,7 +113,9 @@ export default function WatchlistPanel() {
             <tbody>
               {items.map((i) => {
                 const d = details[i.base];
+                const cur = currencyOf(i.symbol);
                 const price = d?.price ?? i.price;
+                const low = d?.week52_low ?? i.week52_low, high = d?.week52_high ?? i.week52_high;
                 const change = d?.change_pct ?? i.change_pct;
                 const label = d?.label ?? i.label;
                 const prev = d ? d.prev_label : null;
@@ -122,14 +124,14 @@ export default function WatchlistPanel() {
                   <tr key={i.base} className="border-b border-line/60 align-top last:border-0">
                     <td className="py-3 pl-4 pr-3 sm:pl-0">
                       <Link href={`/stock/${i.symbol}`} className="font-medium hover:text-accent">{i.name}</Link>
-                      <div className="text-xs text-muted">{i.base}{i.sector ? ` · ${i.sector}` : ""}</div>
+                      <div className="text-xs text-muted">{i.base.replace(/\.US$/, "")}{cur === "USD" ? " · US" : ""}{i.sector ? ` · ${i.sector}` : ""}</div>
                       <Note symbol={i.base} initial={i.note} />
                     </td>
                     <td className="px-3 py-3 text-right">
-                      <div className="font-medium">{rupees(price, 0)}</div>
+                      <div className="font-medium">{money(price, cur, cur === "USD" ? 2 : 0)}</div>
                       {change != null && <div className={`whitespace-nowrap text-xs ${change >= 0 ? "text-good" : "text-bad"}`}>{change >= 0 ? "▲" : "▼"} {pct(Math.abs(change), 2)}</div>}
                     </td>
-                    <td className="px-3 py-3">{i.week52_low != null && i.week52_high != null && price != null ? <RangeDot low={i.week52_low} high={i.week52_high} price={price} /> : <span className="text-muted">—</span>}</td>
+                    <td className="px-3 py-3">{low != null && high != null && price != null ? <RangeDot low={low} high={high} price={price} cur={cur} /> : <span className="text-muted">—</span>}</td>
                     <td className="px-3 py-3">
                       {!d ? <Skeleton className="h-5 w-24" /> : d.score_error ? <span className="text-xs text-muted">{d.score_error}</span> : (
                         <div>

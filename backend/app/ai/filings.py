@@ -1,4 +1,4 @@
-"""Structured AI summaries of NSE corporate announcements, grounded in the filed PDF.
+"""Structured AI summaries of NSE corporate announcements and SEC filings, grounded in the filed document.
 
 Filings are immutable, so each summary is generated once and stored in PostgreSQL.
 """
@@ -14,7 +14,7 @@ from pypdf import PdfReader
 from app import db
 from app.ai import llm
 from app.ai.verify import unverified_numbers
-from app.providers import nse
+from app.providers import nse, sec
 
 MAX_TEXT_CHARS = 15_000  # the substance of a filing is almost always up front; keeps each summary cheap
 _locks: dict[str, threading.Lock] = {}
@@ -36,7 +36,7 @@ class FilingSummary(BaseModel):
     key_figures: list[KeyFigure] = Field(description="Up to 6 important numbers quoted from the filing; empty if none")
 
 
-SYSTEM = """You summarise Indian stock-exchange filings for retail investors.
+SYSTEM = """You summarise stock-exchange filings (NSE announcements, SEC filings) for retail investors.
 Rules:
 - Use only what the filing says. Do not add facts, figures or context from memory.
 - key_figures must be copied from the filing text exactly.
@@ -54,7 +54,8 @@ def _pdf_text(pdf: bytes) -> str:
 
 
 def _find(symbol: str, announcement_id: str) -> dict:
-    for a in nse.announcements(symbol, 200):
+    rows = sec.filings(symbol, 200) if sec.is_us(symbol) else nse.announcements(symbol, 200)
+    for a in rows:
         if a["id"] == announcement_id:
             return a
     raise LookupError(f"Announcement {announcement_id} not found for {symbol}")
@@ -77,7 +78,11 @@ def summarize(symbol: str, announcement_id: str) -> dict:
 
         text, basis = "", "exchange note only"
         content: list[dict] | str
-        if a["pdf_url"]:
+        if a["pdf_url"] and sec.is_us(symbol):
+            text = sec.filing_text(a, MAX_TEXT_CHARS)
+            basis = "filing text" if len(text.strip()) >= 200 else basis
+            content = f"{header}\n\n--- Filing text ---\n{text}" if text.strip() else header
+        elif a["pdf_url"]:
             pdf = nse.download_pdf(a["pdf_url"])
             text = _pdf_text(pdf)
             if len(text.strip()) >= 200:

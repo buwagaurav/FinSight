@@ -5,7 +5,8 @@ Scores are research aids, not recommendations. GMP and other unofficial data are
 import statistics
 
 FINANCIAL_SECTORS = {"Financial Services"}
-RISK_FREE_YIELD_PCT = 7.0  # approx. India 10-year G-sec yield; used as an earnings-yield hurdle
+# 10-year government bond yields, used as an earnings-yield hurdle (approximate; revisit when rates move a lot)
+RISK_FREE_YIELD_PCT = {"INR": 7.0, "USD": 4.3}
 
 
 class Card:
@@ -67,6 +68,7 @@ def _tiered(card: Card, value, tiers, fmt):
 
 def compute(profile: dict, table: list[dict], growth: dict, technical: dict, pe_history: list[dict]) -> dict:
     financial = profile.get("sector") in FINANCIAL_SECTORS
+    hurdle = RISK_FREE_YIELD_PCT.get(profile.get("currency") or "INR", RISK_FREE_YIELD_PCT["INR"])
     n = growth.get("years", 0)
 
     # --- Fundamentals: quality of returns and earnings ---
@@ -120,8 +122,8 @@ def compute(profile: dict, table: list[dict], growth: dict, technical: dict, pe_
                 v.add(-15, f"P/E {pe:.1f} is {gap:.0f}% above its {len(pes)}-year median of {median:.1f}")
             else:
                 v.add(0, f"P/E {pe:.1f} is close to its {len(pes)}-year median of {median:.1f}")
-        _tiered(v, 100 / pe, [(RISK_FREE_YIELD_PCT, 10), (2.5, 0), (None, -10)],
-                lambda ey: f"Earnings yield {ey:.1f}% vs ~{RISK_FREE_YIELD_PCT:.0f}% on 10-year government bonds")
+        _tiered(v, 100 / pe, [(hurdle, 10), (2.5, 0), (None, -10)],
+                lambda ey: f"Earnings yield {ey:.1f}% vs ~{hurdle:.0f}% on 10-year government bonds")
         eps_g = growth.get("eps_cagr_pct")
         if eps_g and eps_g >= 3:  # PEG explodes and stops meaning anything when growth is near zero
             _tiered(v, pe / eps_g, [(2.5, -12), (1, 0), (None, 12)],

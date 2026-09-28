@@ -7,14 +7,15 @@ import threading
 
 from app import research, screener
 from app.analytics import fundamentals
-from app.providers import nse, yahoo
+from app.providers import nse, sec, yahoo
 
-SYMBOL = {"type": "string", "description": "NSE symbol such as TCS or RELIANCE.NS (use search_company if unsure)."}
+SYMBOL = {"type": "string", "description": "NSE symbol such as TCS or RELIANCE.NS, or a US listing ending in .US such as "
+                                           "AAPL.US (use search_company if unsure)."}
 
 TOOLS = [
     {
         "name": "search_company",
-        "description": "Find NSE/BSE listed companies by name. Returns symbols to use with the other tools.",
+        "description": "Find NSE/BSE and US-listed companies by name or ticker. Returns symbols to use with the other tools.",
         "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
     },
     {
@@ -24,7 +25,8 @@ TOOLS = [
     },
     {
         "name": "get_financials",
-        "description": "Annual statements by fiscal year (₹ Cr; EPS ₹) with margins, ROE, ROCE, D/E, cash flow and YoY growth.",
+        "description": "Annual statements by fiscal year with margins, ROE, ROCE, D/E, cash flow and YoY growth. Amounts are "
+                       "₹ Cr (EPS ₹) for Indian companies and $ M (EPS $) for US companies; see `unit`.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -47,12 +49,13 @@ TOOLS = [
     },
     {
         "name": "get_announcements",
-        "description": "Latest official NSE filings by a company (results, dividends, orders, acquisitions...).",
+        "description": "Latest official filings: NSE announcements (results, dividends, orders, acquisitions...) or, "
+                       "for US companies, SEC filings (8-K current reports, 10-Q, 10-K, proxy statements).",
         "input_schema": {"type": "object", "properties": {"symbol": SYMBOL}, "required": ["symbol"]},
     },
     {
         "name": "search_documents",
-        "description": "Search the company's latest annual report and recent NSE filings for what the company or "
+        "description": "NSE-listed companies only. Search the company's latest annual report and recent NSE filings for what the company or "
                        "management said: strategy, reasons behind results, guidance, risks, orders, deals. Returns "
                        "passages with page numbers. Quote exact words from them.",
         "input_schema": {
@@ -76,7 +79,7 @@ TOOLS = [
     },
     {
         "name": "run_screen",
-        "description": "Screen all NSE stocks with numeric filters (percent fields in %, market cap in ₹ Cr).",
+        "description": "Screen all NSE stocks (Indian market only) with numeric filters (percent fields in %, market cap in ₹ Cr).",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -157,7 +160,8 @@ def _snapshot(args, sources: Sources):
             "institutional_holding_pct", "trailing_eps"]
     s = r["scores"]
     return {
-        "profile": {"source": src_quote, **{k: p[k] for k in keep}},
+        "profile": {"source": src_quote, **{k: p[k] for k in keep}, "currency": p.get("currency", "INR"),
+                    "market_cap_unit": "$ M" if sec.is_us(p["symbol"]) else "₹ Cr"},
         "growth": {"source": src_fin, **r["financials"]["growth"]},
         "scores": {
             "source": src_engine,
@@ -209,10 +213,12 @@ def _news(args, sources: Sources):
 
 def _announcements(args, sources: Sources):
     items = []
-    for a in nse.announcements(args["symbol"], 25):
+    us = sec.is_us(args["symbol"])
+    for a in sec.filings(args["symbol"], 60) if us else nse.announcements(args["symbol"], 25):
         if a["routine"]:
             continue
-        sid = sources.add("NSE filing", a["pdf_url"], f"{a['company']}: {a['category']} ({(a['published'] or '')[:10]})")
+        sid = sources.add("SEC filing" if us else "NSE filing", a["pdf_url"],
+                          f"{a['company']}: {a['category']} ({(a['published'] or '')[:10]})")
         items.append({"source": sid, "date": (a["published"] or "")[:10], "category": a["category"], "text": a["text"][:220]})
     return {"announcements": items[:8], "note": "Routine procedural filings are omitted."}
 
@@ -220,6 +226,9 @@ def _announcements(args, sources: Sources):
 def _search_documents(args, sources: Sources):
     from app import docs  # local import: keeps the tool list importable without the database
     symbol = yahoo.normalize_symbol(args["symbol"])
+    if sec.is_us(symbol):
+        return {"result": "Document search covers NSE-listed companies only. Use get_announcements for this "
+                          "company's SEC filings."}
     try:
         docs.index_filings(symbol)  # small PDFs; indexed on first use, cheap afterwards
     except Exception:
@@ -243,7 +252,8 @@ def _compare(args, sources: Sources):
     stored = screener.lookup(symbols)
     rows = []
     for sym in symbols:
-        row = stored.get(sym.split(".")[0].upper())
+        us = sec.is_us(sym)
+        row = None if us else stored.get(sym.split(".")[0].upper())   # the screener stores NSE companies only
         if row is None:  # not loaded yet: compute it live with the same engine
             try:
                 r = research.company_report(sym)
@@ -252,10 +262,12 @@ def _compare(args, sources: Sources):
             except LookupError:
                 rows.append({"symbol": sym, "error": "not found"})
                 continue
-        sid = sources.add("Company filings via Yahoo Finance", f"https://finance.yahoo.com/quote/{row['symbol']}",
+        sid = sources.add("SEC filings and Yahoo Finance quote" if us else "Company filings via Yahoo Finance",
+                          f"https://finance.yahoo.com/quote/{yahoo.yahoo_ticker(row['symbol'])}",
                           f"{row['name']} ({row['symbol']}): metrics")
-        rows.append({"source": sid, **row})
-    return {"companies": rows, "note": "ROCE and debt/equity are not computed for banks and financials."}
+        rows.append({"source": sid, **row, "amount_unit": "$ M" if us else "₹ Cr"})
+    return {"companies": rows, "note": "ROCE and debt/equity are not computed for banks and financials. "
+                                       "Amounts are in each company's own currency (see amount_unit)."}
 
 
 def _screen(args, sources: Sources):

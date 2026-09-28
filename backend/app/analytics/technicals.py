@@ -6,7 +6,7 @@ def _sma(closes: list[float], n: int) -> float | None:
     return sum(closes[-n:]) / n if len(closes) >= n else None
 
 
-def summarize(history: list[dict]) -> dict:
+def summarize(history: list[dict], currency_sign: str = "₹") -> dict:
     closes = [p["close"] for p in history]
     if len(closes) < 30:
         return {"trend": "Insufficient data", "reasons": []}
@@ -23,7 +23,7 @@ def summarize(history: list[dict]) -> dict:
     reasons = []
     if sma200:
         above200 = last > sma200
-        reasons.append(f"Price is {'above' if above200 else 'below'} its 200-day average (₹{sma200:,.0f}).")
+        reasons.append(f"Price is {'above' if above200 else 'below'} its 200-day average ({currency_sign}{sma200:,.0f}).")
     if sma50 and sma200:
         reasons.append(f"50-day average is {'above' if sma50 > sma200 else 'below'} the 200-day average.")
     if sma50 and sma200 and last > sma50 > sma200:

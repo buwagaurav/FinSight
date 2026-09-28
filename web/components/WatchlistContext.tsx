@@ -12,7 +12,8 @@ type Ctx = {
   version: number;   // bumps on every change, so the watchlist panel can reload
 };
 const WatchCtx = createContext<Ctx>({ ready: false, watching: () => false, toggle: async () => {}, error: null, version: 0 });
-const base = (s: string) => s.split(".")[0].toUpperCase();
+// watchlist key: NSE symbol without suffix (TCS), or the full US symbol (AAPL.US) so tickers of the two markets never collide
+const base = (s: string) => { const u = s.toUpperCase(); return u.endsWith(".US") ? u : u.split(".")[0]; };
 
 export function WatchlistProvider({ children }: { children: ReactNode }) {
   const { user, authEnabled } = useUser();

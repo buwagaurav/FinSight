@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 
 from app import db, research
-from app.providers import nse, yahoo
+from app.providers import nse, sec, yahoo
 
 LIMIT = 50
 LABEL_CHANGE_DAYS = 7   # how long a "label changed" badge stays visible
@@ -22,7 +22,8 @@ _BOILERPLATE = re.compile(r"^.{0,120}?\bhas informed (?:the )?(?:Exchange )?(?:a
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS watchlist (
     sub               text NOT NULL,            -- users.sub (Google account id)
-    symbol            text NOT NULL,            -- NSE symbol, e.g. TCS
+    symbol            text NOT NULL,            -- NSE symbol (TCS) or US listing (AAPL.US)
+    name              text,
     note              text,
     added_at          timestamptz NOT NULL DEFAULT now(),
     score             int,                      -- last FinSight score seen for this row
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS watchlist (
     PRIMARY KEY (sub, symbol)
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS watchlist_seen_at timestamptz;
+ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS name text;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS watchlist_prev_seen_at timestamptz;
 """
 _schema_ready = False
@@ -47,7 +49,10 @@ def _ensure_schema():
 
 
 def _base(symbol: str) -> str:
-    return symbol.split(".")[0].upper()
+    """Watchlist key: the NSE symbol (TCS.NS -> TCS), or the full US symbol (AAPL.US), so the two markets'
+    tickers can't collide."""
+    s = symbol.strip().upper()
+    return s if sec.is_us(s) else s.split(".")[0]
 
 
 def symbols(user: dict) -> list[str]:
@@ -58,14 +63,22 @@ def symbols(user: dict) -> list[str]:
 def add(user: dict, symbol: str, note: str | None = None) -> dict:
     _ensure_schema()
     base = _base(symbol)
-    if not db.fetch_one("SELECT 1 FROM companies WHERE symbol = %s", (base,)):
-        raise HTTPException(404, f"{base} isn't an NSE-listed company FinSight knows about.")
+    if sec.is_us(base):
+        try:
+            name = sec._title(sec.lookup(base)["name"])
+        except LookupError:
+            raise HTTPException(404, f"{sec.ticker(base)} isn't a US-listed company FinSight knows about.")
+    else:
+        row = db.fetch_one("SELECT name FROM companies WHERE symbol = %s", (base,))
+        if not row:
+            raise HTTPException(404, f"{base} isn't an NSE-listed company FinSight knows about.")
+        name = row["name"]
     count = db.fetch_one("SELECT count(*) AS n FROM watchlist WHERE sub = %s", (user["sub"],))["n"]
     if count >= LIMIT and not db.fetch_one("SELECT 1 FROM watchlist WHERE sub = %s AND symbol = %s", (user["sub"], base)):
         raise HTTPException(409, f"Your watchlist is full ({LIMIT} stocks). Remove one to add another.")
-    db.execute("""INSERT INTO watchlist (sub, symbol, note) VALUES (%s, %s, %s)
+    db.execute("""INSERT INTO watchlist (sub, symbol, name, note) VALUES (%s, %s, %s, %s)
                   ON CONFLICT (sub, symbol) DO UPDATE SET note = COALESCE(EXCLUDED.note, watchlist.note)""",
-               (user["sub"], base, (note or "").strip()[:200] or None))
+               (user["sub"], base, name, (note or "").strip()[:200] or None))
     return {"symbol": base, "watching": True}
 
 
@@ -87,11 +100,11 @@ def listing(user: dict) -> dict:
     _ensure_schema()
     rows = db.fetch_all("""
         SELECT w.symbol, w.note, w.added_at, w.score, w.label, w.prev_label, w.label_changed_at,
-               c.name AS listed_name, m.yahoo_symbol, m.name, m.sector, m.price, m.market_cap_cr, m.pe, m.roe_pct,
+               COALESCE(c.name, w.name) AS listed_name, m.yahoo_symbol, m.name, m.sector, m.price, m.market_cap_cr, m.pe, m.roe_pct,
                p.data->>'change_pct' AS change_pct, p.data->>'week52_low' AS week52_low,
                p.data->>'week52_high' AS week52_high
         FROM watchlist w
-        JOIN companies c ON c.symbol = w.symbol
+        LEFT JOIN companies c ON c.symbol = w.symbol   -- US listings aren't in the NSE company list
         LEFT JOIN metrics m ON m.symbol = w.symbol
         LEFT JOIN profiles p ON p.symbol = w.symbol
         WHERE w.sub = %s ORDER BY w.added_at""", (user["sub"],))
@@ -110,9 +123,9 @@ def listing(user: dict) -> dict:
         return float(v) if v not in (None, "null") else None
 
     items = [{
-        "symbol": r["yahoo_symbol"] or f"{r['symbol']}.NS",
+        "symbol": r["yahoo_symbol"] or (r["symbol"] if sec.is_us(r["symbol"]) else f"{r['symbol']}.NS"),
         "base": r["symbol"],
-        "name": r["name"] or r["listed_name"],
+        "name": r["name"] or r["listed_name"] or r["symbol"],
         "sector": r["sector"],
         "price": r["price"],
         "change_pct": num(r["change_pct"]),
@@ -156,8 +169,9 @@ def details(user: dict, symbol: str, since: str | None) -> dict:
     try:
         report = research.company_report(yahoo.normalize_symbol(base))
         overall = report["scores"]["overall"]
-        out.update(score=overall["score"], label=overall["label"], price=report["profile"]["price"],
-                   change_pct=report["profile"]["change_pct"])
+        p = report["profile"]
+        out.update(score=overall["score"], label=overall["label"], price=p["price"], change_pct=p["change_pct"],
+                   week52_low=p.get("week52_low"), week52_high=p.get("week52_high"))
         if overall["label"] and overall["label"] != row["label"]:
             # first sighting just records the label; later differences are real changes
             db.execute("""UPDATE watchlist SET score = %s, label = %s,
@@ -174,7 +188,8 @@ def details(user: dict, symbol: str, since: str | None) -> dict:
         out["score_error"] = "Score unavailable right now"
 
     try:
-        latest = next((a for a in nse.announcements(base, 30) if not a["routine"]), None)
+        rows = sec.filings(base, 60) if sec.is_us(base) else nse.announcements(base, 30)
+        latest = next((a for a in rows if not a["routine"]), None)
         if latest:
             out["filing"] = {"category": latest["category"], "text": _BOILERPLATE.sub("", latest["text"]).strip(" -:")[:160], "published": latest["published"],
                              "url": latest["pdf_url"]}

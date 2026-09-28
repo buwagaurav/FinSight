@@ -5,18 +5,19 @@ import type { EChartsOption } from "echarts";
 import Chart, { baseOption, ChartColors } from "@/components/Chart";
 import { Card, InfoTip, SourceLink, Stat } from "@/components/ui";
 import { Company, YearRow } from "@/lib/api";
-import { DASH, num, pct } from "@/lib/format";
+import { amountUnit, Currency, currencySign, DASH, num, pct, tableNumber } from "@/lib/format";
+import { useCurrency } from "@/components/CurrencyContext";
 
 type Key = keyof YearRow;
-const inr = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
 
-function bars(c: ChartColors, rows: YearRow[], series: { key: Key; name: string; color: string }[]): EChartsOption {
+function bars(c: ChartColors, rows: YearRow[], series: { key: Key; name: string; color: string }[], cur: Currency): EChartsOption {
   const base = baseOption(c);
+  const unit = cur === "USD" ? " M" : " Cr";
   return {
     ...base,
-    tooltip: { ...base.tooltip, valueFormatter: (v) => (v == null ? DASH : `₹${inr.format(Number(v))} Cr`) },
+    tooltip: { ...base.tooltip, valueFormatter: (v) => (v == null ? DASH : `${currencySign(cur)}${tableNumber(Number(v), cur)}${unit}`) },
     xAxis: { ...base.xAxis, data: rows.map((r) => r.year) } as EChartsOption["xAxis"],
-    yAxis: { ...base.yAxis, axisLabel: { color: c.muted, fontSize: 11, formatter: (v: number) => inr.format(v) } } as EChartsOption["yAxis"],
+    yAxis: { ...base.yAxis, axisLabel: { color: c.muted, fontSize: 11, formatter: (v: number) => tableNumber(v, cur) } } as EChartsOption["yAxis"],
     series: series.map((s) => ({
       type: "bar", name: s.name, data: rows.map((r) => r[s.key] as number | null),
       itemStyle: { color: s.color, borderRadius: [4, 4, 0, 0] }, barMaxWidth: 26, barGap: "8%",
@@ -49,7 +50,7 @@ const TABLE: TableRow[] = [
   { group: "Profit & loss", label: "Net profit", key: "net_profit", kind: "cr" },
   { group: "Profit & loss", label: "Net profit growth", key: "profit_growth_pct", kind: "pct" },
   { group: "Profit & loss", label: "Net margin", key: "net_margin_pct", kind: "pct", term: "Net margin" },
-  { group: "Profit & loss", label: "EPS (₹)", key: "eps", kind: "rs", term: "EPS" },
+  { group: "Profit & loss", label: "EPS", key: "eps", kind: "rs", term: "EPS" },
   { group: "Returns", label: "ROE", key: "roe_pct", kind: "pct", term: "ROE" },
   { group: "Returns", label: "ROCE", key: "roce_pct", kind: "pct", term: "ROCE" },
   { group: "Balance sheet", label: "Shareholders' equity", key: "equity", kind: "cr" },
@@ -65,9 +66,9 @@ const TABLE: TableRow[] = [
   { group: "Cash flow", label: "Dividends paid", key: "dividends_paid", kind: "cr" },
 ];
 
-function fmt(v: unknown, kind: TableRow["kind"]) {
+function fmt(v: unknown, kind: TableRow["kind"], cur: Currency) {
   if (v == null || typeof v !== "number") return DASH;
-  if (kind === "cr") return inr.format(v);
+  if (kind === "cr") return tableNumber(v, cur);
   if (kind === "pct") return pct(v);
   if (kind === "x") return num(v, 2) + "x";
   return num(v, 2);
@@ -77,6 +78,8 @@ export default function Fundamentals({ c }: { c: Company }) {
   const rows = c.financials.years;
   const g = c.financials.growth;
   const [compact, setCompact] = useState(true);
+  const cur = useCurrency();
+  const unit = amountUnit(cur);
   const financial = c.profile.sector === "Financial Services";
   const tableRows = compact ? TABLE.filter((r) => r.group === "Profit & loss" || r.group === "Returns") : TABLE;
 
@@ -94,13 +97,13 @@ export default function Fundamentals({ c }: { c: Company }) {
       </Card>
 
       <div className="grid lg:grid-cols-2 gap-4">
-        <Card title="Revenue and net profit (₹ Cr)">
+        <Card title={`Revenue and net profit (${unit})`}>
           <Chart label="Revenue and net profit by year" build={(k) => bars(k, rows, [
-            { key: "revenue", name: "Revenue", color: k.s1 }, { key: "net_profit", name: "Net profit", color: k.s2 }])} />
+            { key: "revenue", name: "Revenue", color: k.s1 }, { key: "net_profit", name: "Net profit", color: k.s2 }], cur)} />
         </Card>
-        <Card title={<>Profit vs cash actually generated (₹ Cr)<InfoTip term="Cash conversion" /></>}>
+        <Card title={<>Profit vs cash actually generated ({unit})<InfoTip term="Cash conversion" /></>}>
           <Chart label="Net profit versus operating cash flow by year" build={(k) => bars(k, rows, [
-            { key: "net_profit", name: "Net profit", color: k.s2 }, { key: "operating_cash_flow", name: "Operating cash flow", color: k.s3 }])} />
+            { key: "net_profit", name: "Net profit", color: k.s2 }, { key: "operating_cash_flow", name: "Operating cash flow", color: k.s3 }], cur)} />
         </Card>
         <Card title={<>Margins<InfoTip term="Operating margin" /></>}>
           <Chart label="Operating and net margin by year" build={(k) => lines(k, rows, [
@@ -116,8 +119,8 @@ export default function Fundamentals({ c }: { c: Company }) {
             <Chart label="Debt to equity ratio by year" build={(k) => ({ ...lines(k, rows, [{ key: "debt_to_equity", name: "Debt / Equity", color: k.s1 }], "x"), legend: { show: false } })} />
           </Card>
         )}
-        <Card title={<>Free cash flow (₹ Cr)<InfoTip term="Free cash flow" /></>}>
-          <Chart label="Free cash flow by year" build={(k) => ({ ...bars(k, rows, [{ key: "free_cash_flow", name: "Free cash flow", color: k.s3 }]), legend: { show: false } })} />
+        <Card title={<>Free cash flow ({unit})<InfoTip term="Free cash flow" /></>}>
+          <Chart label="Free cash flow by year" build={(k) => ({ ...bars(k, rows, [{ key: "free_cash_flow", name: "Free cash flow", color: k.s3 }], cur), legend: { show: false } })} />
         </Card>
       </div>
 
@@ -138,7 +141,7 @@ export default function Fundamentals({ c }: { c: Company }) {
                   {rows.map((r) => {
                     const v = r[t.key];
                     const negative = typeof v === "number" && v < 0 && t.kind !== "cr";
-                    return <td key={r.year} className={`text-right py-2 px-3 ${negative ? "text-bad" : ""}`}>{fmt(v, t.kind)}</td>;
+                    return <td key={r.year} className={`text-right py-2 px-3 ${negative ? "text-bad" : ""}`}>{fmt(v, t.kind, cur)}</td>;
                   })}
                 </tr>
               ))}

@@ -6,12 +6,22 @@ A figure passes if some tool-returned value rounds to it at the precision the an
 import json
 import re
 
-# ₹1,23,456.78 | 48.7% | 2.67 L Cr | 15.1x | -38%
+# ₹1,23,456.78 | 48.7% | 2.67 L Cr | 15.1x | -38% | $416.2 B | $4.9 trillion
 NUMBER = re.compile(
-    r"(?<![\w.])(?P<sign>[-−])?₹?\s?(?P<num>\d{1,3}(?:,\d{2,3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
-    r"(?P<unit>\s?(?:%|x\b|L\s?Cr\b|lakh crore|Cr\b|crore))?",
+    r"(?<![\w.])(?P<sign>[-−])?[₹$]?\s?(?P<num>\d{1,3}(?:,\d{2,3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
+    r"(?P<unit>\s?(?:%|x\b|L\s?Cr\b|lakh crore|Cr\b|crore|trillion\b|billion\b|million\b|bn\b|[MBT]\b))?",
     re.IGNORECASE,
 )
+# Tool amounts are in ₹ crore (Indian companies) or $ millions (US); larger units written in answers scale to those
+UNIT_SCALE = [(("l", "lakh"), 1e5), (("trillion", "t"), 1e6), (("billion", "bn", "b"), 1e3)]
+
+
+def _unit_scale(unit: str | None) -> float:
+    u = (unit or "").strip().lower().replace(" ", "")
+    for prefixes, scale in UNIT_SCALE:
+        if u in prefixes or (prefixes[0] == "l" and u.startswith(("lcr", "lakh"))):
+            return scale
+    return 1.0
 CITATION = re.compile(r"\[S\d+(?:\s*,\s*S\d+)*\]")
 FISCAL_YEAR = re.compile(r"\bFY\s?\d{2,4}\b", re.IGNORECASE)
 
@@ -20,7 +30,7 @@ def _parse(match: re.Match) -> tuple[float, float]:
     """(value, tolerance) in base units. Tolerance is half a unit of the last digit the answer shows."""
     text = match.group("num").replace(",", "")
     decimals = len(text.split(".")[1]) if "." in text else 0
-    scale = 1e5 if (match.group("unit") or "").strip().lower().startswith(("l", "lakh")) else 1.0
+    scale = _unit_scale(match.group("unit"))
     value = float(text) * scale
     tolerance = 0.5 * 10 ** -decimals * scale
     return value, tolerance
@@ -216,7 +226,7 @@ def unsupported_quotes(answer: str, tool_outputs: list[str]) -> list[str]:
 
 # ---------------------------------------------------------------- arithmetic re-check (FinGround-style)
 
-_AMOUNT = r"(-?₹?\s?\d[\d,]*(?:\.\d+)?)\s*(L\s?Cr|lakh crore|Cr|crore)?"
+_AMOUNT = r"(-?[₹$]?\s?\d[\d,]*(?:\.\d+)?)\s*(L\s?Cr|lakh crore|Cr|crore|trillion|billion|million|bn|[MBT]\b)?"
 FROM_TO = re.compile(rf"from\s+{_AMOUNT}(?:\s+(?:in\s+)?FY\s?\d{{2,4}})?\s+to\s+{_AMOUNT}", re.IGNORECASE)
 ARROW = re.compile(rf"{_AMOUNT}\s*(?:→|->)\s*{_AMOUNT}")
 PERCENT = re.compile(r"(-?\d+(?:\.\d+)?)\s?%")
@@ -224,8 +234,8 @@ YEARS = re.compile(r"(?:over|in)\s+(\d{1,2})\s+years|FY\s?(\d{2,4})\s*(?:to|-|�
 
 
 def _amount(num: str, unit: str | None) -> float:
-    value = float(num.replace("₹", "").replace(",", "").strip())
-    return value * 1e5 if unit and unit.lower().replace(" ", "").startswith(("lcr", "lakh")) else value
+    value = float(num.replace("₹", "").replace("$", "").replace(",", "").strip())
+    return value * _unit_scale(unit)
 
 
 def arithmetic_errors(answer: str) -> list[str]:

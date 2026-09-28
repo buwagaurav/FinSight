@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from app import auth, gmp, loader, research, screener, watchlist
 from app.ai import assistant, filings, llm, report, screen_nl
-from app.providers import nse, yahoo
+from app.providers import nse, sec, yahoo
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -61,6 +61,7 @@ def health_sources():
         "yahoo_quote": check(lambda: yahoo.profile.__wrapped__("RELIANCE.NS")),
         "yahoo_prices": check(lambda: yahoo.price_history.__wrapped__("RELIANCE.NS", "1mo") or (_ for _ in ()).throw(ValueError("empty"))),
         "nse": check(lambda: nse.current_ipos.__wrapped__()),
+        "sec_edgar": check(lambda: sec.company_facts.__wrapped__(320193)),
         "investorgain": check(lambda: investorgain.live_list.__wrapped__()),
         "database": check(lambda: screener.coverage()),
     }
@@ -92,10 +93,13 @@ def company_news(symbol: str):
 
 @app.get("/api/company/{symbol}/announcements")
 def company_announcements(symbol: str, limit: int = Query(30, le=100)):
+    us = sec.is_us(symbol)
     try:
-        rows = nse.announcements(symbol, limit)
+        rows = sec.filings(symbol, limit) if us else nse.announcements(symbol, limit)
+    except LookupError:
+        raise HTTPException(404, f"No listed company found for {symbol}")
     except Exception as e:
-        raise HTTPException(502, f"NSE announcements unavailable: {e}")
+        raise HTTPException(502, f"{'SEC filings' if us else 'NSE announcements'} unavailable: {e}")
     return [{**a, "summary": filings.cached(a["id"])} for a in rows]
 
 

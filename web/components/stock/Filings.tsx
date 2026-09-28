@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Badge, Card, Skeleton } from "@/components/ui";
 import { AiStatus, Announcement, api, SummaryResult } from "@/lib/api";
-import { date } from "@/lib/format";
+import { date, currencyOf } from "@/lib/format";
 import SignInPrompt from "@/components/SignInPrompt";
 import { useUser } from "@/components/UserContext";
 
@@ -78,15 +78,16 @@ export default function Filings({ symbol }: { symbol: string }) {
     }
   }
 
+  const us = currencyOf(symbol) === "USD";
   const visible = items?.filter((a) => showRoutine || !a.routine) ?? [];
   const hidden = (items?.length ?? 0) - visible.length;
 
   return (
-    <Card title="Exchange filings (NSE)"
+    <Card title={us ? "SEC filings (EDGAR)" : "Exchange filings (NSE)"}
       action={hidden > 0 || showRoutine
         ? <button onClick={() => setShowRoutine(!showRoutine)} className="text-xs text-accent hover:underline">{showRoutine ? "Hide routine filings" : `Show ${hidden} routine filings`}</button>
         : undefined}>
-      {error && <p className="text-sm text-muted">NSE filings are unavailable right now.</p>}
+      {error && <p className="text-sm text-muted">{us ? "SEC" : "NSE"} filings are unavailable right now.</p>}
       {!items && !error && <div className="space-y-3"><Skeleton className="h-14" /><Skeleton className="h-14" /></div>}
       {ai?.tasks.summary.configured && ai.sign_in_required && !user && items && (
         <div className="mb-3"><SignInPrompt what="get AI summaries of these filings" /></div>
@@ -100,7 +101,7 @@ export default function Filings({ symbol }: { symbol: string }) {
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
               <Badge variant={a.routine ? "neutral" : "accent"}>{a.category || "Announcement"}</Badge>
               <span>{date(a.published)}</span>
-              {a.pdf_url && <a href={a.pdf_url} target="_blank" rel="noreferrer" className="underline hover:text-ink">Filing PDF{a.pdf_size ? ` (${a.pdf_size})` : ""} ↗</a>}
+              {a.pdf_url && <a href={a.pdf_url} target="_blank" rel="noreferrer" className="underline hover:text-ink">{us ? "View filing" : "Filing PDF"}{a.pdf_size ? ` (${a.pdf_size})` : ""} ↗</a>}
             </div>
             <p className="text-sm text-ink-2 mt-1.5 line-clamp-3">{a.text}</p>
             {a.summary ? <Summary r={a.summary} /> : ai?.tasks.summary.configured && (!ai.sign_in_required || user) && (

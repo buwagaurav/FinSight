@@ -3,7 +3,8 @@
 import Chart, { baseOption } from "@/components/Chart";
 import { Card, InfoTip, Stat } from "@/components/ui";
 import { Company } from "@/lib/api";
-import { num, pct, rupees } from "@/lib/format";
+import { money, num, pct } from "@/lib/format";
+import { useCurrency } from "@/components/CurrencyContext";
 
 const CASES = [
   { id: "bear", title: "Bear case", tone: "text-bad", icon: "▼" },
@@ -15,6 +16,7 @@ export default function Valuation({ c }: { c: Company }) {
   const p = c.profile;
   const v = c.valuation;
   const sc = v.scenarios;
+  const cur = useCurrency();
   const peData = [...v.pe_history.map((h) => ({ label: h.year, pe: h.pe })), ...(p.pe ? [{ label: "Today", pe: p.pe }] : [])];
 
   let lo = 0, hi = 1;
@@ -74,7 +76,7 @@ export default function Valuation({ c }: { c: Company }) {
                   </div>
                 ))}
                 <div className="absolute top-0 -translate-x-1/2 text-center" style={{ left: at(sc.current_price) }}>
-                  <div className="text-[11px] font-medium text-accent whitespace-nowrap">Today {rupees(sc.current_price, 0)}</div>
+                  <div className="text-[11px] font-medium text-accent whitespace-nowrap">Today {money(sc.current_price, cur, 0)}</div>
                   <div className="w-0.5 h-6 bg-accent mx-auto" />
                 </div>
               </div>
@@ -84,13 +86,13 @@ export default function Valuation({ c }: { c: Company }) {
                   return (
                     <div key={k.id} className="rounded-xl border border-line p-3">
                       <div className={`text-xs font-semibold ${k.tone}`}>{k.icon} {k.title}</div>
-                      <div className="text-xl font-semibold tabular mt-1">{rupees(s.implied_price, 0)}</div>
+                      <div className="text-xl font-semibold tabular mt-1">{money(s.implied_price, cur, 0)}</div>
                       <div className={`text-sm tabular ${s.implied_return_pct >= 0 ? "text-good" : "text-bad"}`}>
                         {pct(s.implied_return_pct, 0, true)} total{s.implied_annual_return_pct != null && ` · ${pct(s.implied_annual_return_pct, 1, true)}/yr`}
                       </div>
                       <dl className="text-xs text-muted mt-2 space-y-0.5">
                         <div className="flex justify-between"><dt>EPS growth</dt><dd className="tabular text-ink-2">{pct(s.growth_pct)}/yr</dd></div>
-                        <div className="flex justify-between"><dt>EPS in {sc.horizon_years}y</dt><dd className="tabular text-ink-2">{rupees(s.eps_in_3y)}</dd></div>
+                        <div className="flex justify-between"><dt>EPS in {sc.horizon_years}y</dt><dd className="tabular text-ink-2">{money(s.eps_in_3y, cur)}</dd></div>
                         <div className="flex justify-between"><dt>Exit P/E</dt><dd className="tabular text-ink-2">{num(s.exit_pe)}x</dd></div>
                       </dl>
                     </div>

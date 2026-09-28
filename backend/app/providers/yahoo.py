@@ -1,7 +1,8 @@
-"""Market data from Yahoo Finance (via yfinance) for NSE/BSE-listed companies.
+"""Market data from Yahoo Finance (via yfinance) for NSE/BSE- and US-listed companies.
 
-All monetary statement values are converted to ₹ crore (1 Cr = 1e7) at this boundary,
-so everything downstream works in the units Indian investors read.
+Indian companies: amounts are converted to ₹ crore (1 Cr = 1e7) at this boundary, the units Indian investors
+read. US companies (symbols ending in .US) keep dollars, shown in $ millions; their statements come from SEC
+EDGAR (app.providers.sec), and Yahoo supplies the quote and price history.
 """
 import math
 import re
@@ -10,6 +11,7 @@ import pandas as pd
 import yfinance as yf
 
 from app.cache import ttl_cache
+from app.providers import sec
 
 CRORE = 1e7
 INDIAN_EXCHANGES = {"NSI": "NSE", "BSE": "BSE"}
@@ -20,6 +22,16 @@ def normalize_symbol(symbol: str) -> str:
     if "." not in symbol:
         symbol += ".NS"
     return symbol
+
+
+def yahoo_ticker(symbol: str) -> str:
+    """Yahoo's ticker for a FinSight symbol: US listings drop the .US marker (AAPL.US -> AAPL)."""
+    return sec.ticker(symbol) if sec.is_us(symbol) else symbol
+
+
+def amount_scale(symbol: str) -> float:
+    """Display unit for money amounts: ₹ crore for Indian listings, $ millions for US ones."""
+    return sec.MILLION if sec.is_us(symbol) else CRORE
 
 
 def _clean(value):
@@ -34,6 +46,22 @@ def _clean(value):
 
 @ttl_cache(seconds=3600)
 def search(query: str) -> list[dict]:
+    """Indian listings from Yahoo plus US listings from the SEC's ticker list. An exact US ticker match comes
+    first; otherwise Indian results lead, as FinSight is built for Indian investors."""
+    try:
+        indian = _search_indian(query)
+    except Exception:
+        indian = []
+    try:
+        us = sec.search(query)
+    except Exception:
+        us = []
+    exact = [r for r in us if sec.ticker(r["symbol"]) == query.strip().upper()]
+    rest = [r for r in us if r not in exact]
+    return (exact + indian + rest)[:12]
+
+
+def _search_indian(query: str) -> list[dict]:
     results = yf.Search(query, max_results=12, news_count=0).quotes
     seen, out = set(), []
     for q in results:
@@ -55,7 +83,8 @@ def search(query: str) -> list[dict]:
 
 @ttl_cache(seconds=600)
 def profile(symbol: str) -> dict:
-    info = yf.Ticker(symbol).info
+    us = sec.is_us(symbol)
+    info = yf.Ticker(yahoo_ticker(symbol)).info
     has_name = info.get("longName") or info.get("shortName")
     if not info or not has_name or info.get("quoteType") not in ("EQUITY", None):
         raise LookupError(symbol)
@@ -65,16 +94,17 @@ def profile(symbol: str) -> dict:
     return {
         "symbol": symbol,
         "name": info.get("longName") or info.get("shortName"),
-        "exchange": "BSE" if symbol.endswith(".BO") else "NSE",
+        "exchange": sec.lookup(symbol)["exchange"] if us else "BSE" if symbol.endswith(".BO") else "NSE",
         "sector": info.get("sector"),
         "industry": info.get("industry"),
         "summary": info.get("longBusinessSummary"),
         "website": info.get("website"),
-        "currency": info.get("currency", "INR"),
+        "currency": "USD" if us else info.get("currency", "INR"),
         "price": price,
         "previous_close": prev,
         "change_pct": (price / prev - 1) * 100 if price and prev else None,
-        "market_cap_cr": _clean(info.get("marketCap")) / CRORE if info.get("marketCap") else None,
+        # named for crore, but in each market's display unit: ₹ crore, or $ millions for US listings
+        "market_cap_cr": _clean(info.get("marketCap")) / amount_scale(symbol) if info.get("marketCap") else None,
         "week52_high": _clean(info.get("fiftyTwoWeekHigh")),
         "week52_low": _clean(info.get("fiftyTwoWeekLow")),
         "pe": _clean(info.get("trailingPE")),
@@ -92,7 +122,7 @@ def profile(symbol: str) -> dict:
         "beta": _clean(info.get("beta")),
         "trailing_eps": _clean(info.get("trailingEps")),
         "financial_currency": info.get("financialCurrency") or info.get("currency", "INR"),
-        "source": {"name": "Yahoo Finance", "url": f"https://finance.yahoo.com/quote/{symbol}"},
+        "source": {"name": "Yahoo Finance", "url": f"https://finance.yahoo.com/quote/{yahoo_ticker(symbol)}"},
     }
 
 
@@ -142,7 +172,9 @@ def _statements_in_foreign_currency(income: dict, fx: pd.Series, trailing_eps: f
 @ttl_cache(seconds=6 * 3600)
 def annual_statements(symbol: str) -> dict:
     """Annual statements in rupees. A few Indian companies (e.g. Infosys) are stored by Yahoo in USD;
-    those are converted at the exchange rate on each fiscal year-end date."""
+    those are converted at the exchange rate on each fiscal year-end date. US companies come from SEC EDGAR."""
+    if sec.is_us(symbol):
+        return sec.annual_statements(symbol)
     t = yf.Ticker(symbol)
     out = {
         "income": _statement_rows(t.income_stmt),
@@ -163,7 +195,7 @@ def annual_statements(symbol: str) -> dict:
 
 @ttl_cache(seconds=900)
 def price_history(symbol: str, period: str = "5y") -> list[dict]:
-    hist = yf.Ticker(symbol).history(period=period, interval="1d", auto_adjust=True)
+    hist = yf.Ticker(yahoo_ticker(symbol)).history(period=period, interval="1d", auto_adjust=True)
     return [
         {"date": idx.date().isoformat(), "close": round(float(row["Close"]), 2), "volume": int(row["Volume"])}
         for idx, row in hist.iterrows()
@@ -177,7 +209,7 @@ _SUFFIXES = {"limited", "ltd", "ltd.", "india", "(india)", "company", "co", "cor
 
 def _name_keys(symbol: str) -> list[str]:
     """Ways an article might name the company: its NSE symbol and the distinctive part of its name."""
-    keys = {symbol.split(".")[0].lower()}
+    keys = {yahoo_ticker(symbol).split(".")[0].lower()}
     try:
         words = [w for w in profile(symbol)["name"].lower().split() if w not in _SUFFIXES]
         if len(words) >= 2:
@@ -194,8 +226,9 @@ def news(symbol: str) -> list[dict]:
     """Recent articles that actually mention the company. Yahoo's feed for Indian tickers mixes in unrelated
     stories, so anything that doesn't name the company or its symbol is dropped."""
     keys = _name_keys(symbol)
+    us = sec.is_us(symbol)
     items = []
-    for n in yf.Ticker(symbol).news or []:
+    for n in yf.Ticker(yahoo_ticker(symbol)).news or []:
         c = n.get("content", n)
         url = (c.get("canonicalUrl") or {}).get("url") or (c.get("clickThroughUrl") or {}).get("url")
         if not c.get("title") or not url:
@@ -203,7 +236,7 @@ def news(symbol: str) -> list[dict]:
         text = f"{c['title']} {c.get('summary') or c.get('description') or ''}".lower()
         if not any(re.search(rf"\b{re.escape(k)}\b", text) for k in keys):
             continue
-        if FOREIGN_TICKER.search(c["title"]):
+        if not us and FOREIGN_TICKER.search(c["title"]):
             continue  # e.g. "Reliance (NYSE:RS)" is Reliance Steel, not Reliance Industries
         items.append({
             "title": c["title"],

@@ -155,3 +155,28 @@ def test_details_only_for_watched_stocks(db, live):
     with pytest.raises(HTTPException) as e:
         watchlist.details(USER, "TCS", None)
     assert e.value.status_code == 404
+
+
+def test_us_listings(db, live, monkeypatch):
+    from app.providers import sec
+    monkeypatch.setattr(sec, "tickers", lambda: {"AAPL": {"cik": 320193, "name": "Apple Inc.", "exchange": "NASDAQ"},
+                                                 "TCS": {"cik": 1, "name": "TCS GROUP HOLDING", "exchange": "NYSE"}})
+    monkeypatch.setattr(sec, "filings", lambda s, n: [filing("2026-07-30T20:30:28+00:00", "Results")])
+    watchlist.add(USER, "aapl.us")
+    watchlist.add(USER, "TCS.US")                  # a US ticker that is also an NSE symbol
+    watchlist.add(USER, "TCS.NS")
+    assert watchlist.symbols(USER) == ["AAPL.US", "TCS.US", "TCS"]
+
+    items = {i["base"]: i for i in watchlist.listing(USER)["items"]}
+    assert items["AAPL.US"]["symbol"] == "AAPL.US" and items["AAPL.US"]["name"] == "Apple Inc."
+    assert items["TCS.US"]["name"] == "Tcs Group Holding" and items["TCS"]["name"] == "Tata Consultancy Services Limited"
+
+    d = watchlist.details(USER, "AAPL.US", "2026-07-01T00:00:00+00:00")
+    assert d["filing"]["text"] == "Results" and d["filing"]["new"] is True
+    assert d["week52_low"] is None or isinstance(d["week52_low"], float)
+
+    with pytest.raises(HTTPException) as e:
+        watchlist.add(USER, "NOPE.US")
+    assert e.value.status_code == 404
+    watchlist.remove(USER, "AAPL.US")
+    assert watchlist.symbols(USER) == ["TCS.US", "TCS"]

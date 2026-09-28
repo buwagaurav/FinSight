@@ -59,7 +59,7 @@ export default function SearchBox({ large = false, autoFocus = false }: { large?
         onChange={(e) => { setQ(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
         onKeyDown={onKey}
-        placeholder={large ? "Search any stock: Reliance, TCS, HDFC Bank…" : "Search stocks"}
+        placeholder={large ? "Search any stock: Reliance, TCS, Apple, NVIDIA…" : "Search stocks"}
         aria-label="Search stocks"
         role="combobox"
         aria-expanded={open && results.length > 0}
@@ -68,7 +68,7 @@ export default function SearchBox({ large = false, autoFocus = false }: { large?
       {open && q.trim().length >= 2 && (
         <ul role="listbox" className="absolute z-40 mt-2 w-full bg-surface border border-line rounded-xl shadow-lg overflow-hidden">
           {loading && results.length === 0 && <li className="px-4 py-3 text-sm text-muted">Searching…</li>}
-          {!loading && results.length === 0 && <li className="px-4 py-3 text-sm text-muted">No NSE/BSE listed company found</li>}
+          {!loading && results.length === 0 && <li className="px-4 py-3 text-sm text-muted">No Indian or US listed company found</li>}
           {results.map((r, i) => (
             <li key={r.symbol} role="option" aria-selected={i === active}
               onMouseEnter={() => setActive(i)} onMouseDown={() => go(r.symbol)}

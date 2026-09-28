@@ -37,6 +37,18 @@ cd web && npm test
 Backend tests run against a throwaway PostgreSQL and stub out Yahoo, NSE and the AI providers, so they are free,
 offline and never touch your data. GitHub Actions runs both suites on every push.
 
+## Data sources
+
+| What | India | US |
+|---|---|---|
+| Company list | NSE equity list | SEC `company_tickers_exchange.json` (NYSE, Nasdaq, Cboe) |
+| Annual statements | Yahoo Finance | SEC EDGAR XBRL company facts (10-K) |
+| Price, quote, news | Yahoo Finance | Yahoo Finance |
+| Filings | NSE corporate announcements | SEC EDGAR filings (8-K, 10-Q, 10-K, proxy) |
+
+SEC EDGAR is free and needs no key; it asks for a User-Agent with a contact email. FinSight sends
+`FinSight finsightapp.support@gmail.com`; override it with `FINSIGHT_SEC_USER_AGENT`.
+
 ## How it is built
 
 | Layer | What it does |
@@ -68,6 +80,10 @@ Product rules the code follows:
 - Yahoo's reported EPS is not always restated for bonus issues, so EPS is derived from net profit ÷ average shares.
 - No free official GMP feed exists. GMP is entered with its source via the IPO page or `POST /api/ipos/{symbol}/gmp`.
 - The first full load of ~2,550 companies can take a few hours when Yahoo rate-limits; the screener shows its coverage meanwhile.
+- US stocks (symbols like `AAPL.US`): company pages, filings, AI and the watchlist work; the screener covers NSE only.
+  Statements come from SEC EDGAR 10-K filings (last 5 years, share counts split-adjusted); foreign companies that
+  file 20-F under IFRS show a quote but no statements. Prices come from Yahoo; if Yahoo is unavailable, US pages show
+  SEC fundamentals without a live price (Stooq, the planned backup, now blocks non-browser downloads).
 
 ## Roadmap
 

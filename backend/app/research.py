@@ -4,7 +4,7 @@ Shared by the REST API and the AI assistant's tools, so both always see identica
 """
 from app import db
 from app.analytics import fundamentals, scores, technicals, valuation
-from app.providers import yahoo
+from app.providers import sec, yahoo
 
 
 def _stored(symbol: str) -> tuple[dict, dict, str] | None:
@@ -18,26 +18,63 @@ def _stored(symbol: str) -> tuple[dict, dict, str] | None:
     return (row["profile"], row["statements"], row["updated_at"].strftime("%d %b %Y, %H:%M UTC")) if row else None
 
 
+def _us_profile_from_sec(symbol: str) -> dict:
+    """What SEC EDGAR alone can say about a US company when Yahoo's quote is unavailable: no live price."""
+    info, ind = sec.lookup(symbol), sec.industry(symbol)
+    blank = dict.fromkeys(["summary", "price", "previous_close", "change_pct", "market_cap_cr", "week52_high",
+                           "week52_low", "pe", "forward_pe", "pb", "ev_ebitda", "ps", "peg", "dividend_yield_pct",
+                           "roe_ttm_pct", "debt_to_equity_ttm", "promoter_holding_pct", "institutional_holding_pct",
+                           "beta", "trailing_eps"])
+    return {**blank, "symbol": symbol, "name": sec._title(info["name"]), "exchange": info["exchange"],
+            "sector": ind["sector"], "industry": ind["industry"], "website": ind["website"], "currency": "USD",
+            "financial_currency": "USD",
+            "source": {"name": "SEC EDGAR", "url": f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={info['cik']}"}}
+
+
+def _us_inputs(symbol: str) -> tuple[dict, dict, str | None]:
+    """Profile (Yahoo quote, or SEC-only) and SEC statements for a US listing. LookupError if not listed."""
+    sec.lookup(symbol)
+    note = None
+    try:
+        profile = dict(yahoo.profile(symbol))
+    except Exception:
+        profile = _us_profile_from_sec(symbol)
+        note = "Live prices from Yahoo Finance are unavailable right now; fundamentals below are from SEC filings."
+    if not profile.get("sector"):
+        profile["sector"] = sec.industry(symbol)["sector"]
+    try:
+        statements = sec.annual_statements(symbol)
+    except LookupError:
+        statements = {"income": {}, "balance": {}, "cashflow": {}, "converted_from": None, "scale": sec.MILLION}
+        note = ((note + " ") if note else "") + (
+            "This company doesn't file US-GAAP annual reports (10-K) with the SEC, typically because it is a "
+            "foreign company filing a 20-F under IFRS, so FinSight can't show its financial statements yet.")
+    return profile, statements, note
+
+
 def company_report(symbol: str) -> dict:
     """Raises LookupError when the symbol is not a listed company."""
     symbol = yahoo.normalize_symbol(symbol)
     stale_note = None
-    try:
-        profile = dict(yahoo.profile(symbol))  # copy: we override some multiples below, the cached original stays intact
-        statements = yahoo.annual_statements(symbol)
-    except Exception:
-        stored = _stored(symbol)
-        if not stored:
-            raise LookupError(symbol)
-        profile, statements, as_of = dict(stored[0]), stored[1], stored[2]
-        stale_note = f"Live market data is unavailable right now; showing FinSight's last stored data ({as_of})."
+    if sec.is_us(symbol):
+        profile, statements, stale_note = _us_inputs(symbol)
+    else:
+        try:
+            profile = dict(yahoo.profile(symbol))  # copy: we override some multiples below, the cached original stays intact
+            statements = yahoo.annual_statements(symbol)
+        except Exception:
+            stored = _stored(symbol)
+            if not stored:
+                raise LookupError(symbol)
+            profile, statements, as_of = dict(stored[0]), stored[1], stored[2]
+            stale_note = f"Live market data is unavailable right now; showing FinSight's last stored data ({as_of})."
     table = fundamentals.build_table(statements)
     growth = fundamentals.growth_summary(table)
     try:
         history = yahoo.price_history(symbol)
     except Exception:
         history = []  # chart and trend show "insufficient data"; fundamentals still work
-    technical = technicals.summarize(history)
+    technical = technicals.summarize(history, "$" if sec.is_us(symbol) else "₹")
     pe_history = valuation.historical_pe(table, history)
     checks = fundamentals.data_checks(table, profile, statements.get("converted_from"))
     if stale_note:
@@ -49,8 +86,10 @@ def company_report(symbol: str) -> dict:
 
     return {
         "profile": profile,
-        "financials": {"unit": "₹ Cr (EPS in ₹)", "years": table, "growth": growth, "data_checks": checks,
-                       "source": {"name": "Company filings via Yahoo Finance", "url": profile["source"]["url"] + "/financials"}},
+        "financials": {"unit": "$ M (EPS in $)" if sec.is_us(symbol) else "₹ Cr (EPS in ₹)", "years": table,
+                       "growth": growth, "data_checks": checks,
+                       "source": statements.get("source") or {"name": "Company filings via Yahoo Finance",
+                                                              "url": profile["source"]["url"] + "/financials"}},
         "scores": company_scores,
         "technical": technical,
         "valuation": {

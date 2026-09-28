@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { CurrencyProvider } from "@/components/CurrencyContext";
+import { currencyOf } from "@/lib/format";
 import { useParams } from "next/navigation";
 import Header from "@/components/stock/Header";
 import ScorePanel from "@/components/stock/ScorePanel";
@@ -47,6 +49,7 @@ export default function StockPage() {
   }
 
   return (
+    <CurrencyProvider value={currencyOf(data.profile.symbol)}>
     <div className="space-y-4">
       <Header c={data} />
       <ScorePanel c={data} />
@@ -65,5 +68,6 @@ export default function StockPage() {
       {tab === "AI report" && <ResearchReport symbol={data.profile.symbol} name={data.profile.name} />}
       {tab === "Filings & news" && <div className="grid lg:grid-cols-5 gap-4"><div className="lg:col-span-3"><Filings symbol={sym} /></div><div className="lg:col-span-2"><News symbol={sym} /></div></div>}
     </div>
+    </CurrencyProvider>
   );
 }
