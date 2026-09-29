@@ -26,7 +26,7 @@ def usd(*rows):
 
 FACTS = {"facts": {
     "dei": {"EntityCommonStockSharesOutstanding": {"units": {"shares": [
-        {"end": "2025-10-15", "val": 900}, {"end": "2026-01-20", "val": 1000}, {"end": "2026-01-20", "val": 50}]}}},
+        {"end": "2025-10-15", "val": 90e6}, {"end": "2026-01-20", "val": 100e6}, {"end": "2026-01-20", "val": 5e6}]}}},
     "us-gaap": {
         # older years reported under SalesRevenueNet, newer under the post-2018 concept
         "SalesRevenueNet": usd(flow("2021-09-30", 800e6, "2021-11-01")),
@@ -118,7 +118,7 @@ def test_statements_become_a_table_in_dollar_millions(edgar):
 
 
 def test_shares_outstanding_sums_share_classes_on_latest_date(edgar):
-    assert sec.shares_outstanding("ACME.US") == 1050
+    assert sec.shares_outstanding("ACME.US") == 105e6
 
 
 def test_filings_are_labelled_and_routine_ones_flagged(edgar):
@@ -215,12 +215,39 @@ def test_us_quote_is_rebuilt_from_price_history_when_yahoo_quote_fails(edgar, mo
     p = research.company_report("ACME.US")["profile"]
     assert p["price"] == 12.0 and p["change_pct"] == pytest.approx((12 / 11 - 1) * 100)
     assert (p["week52_low"], p["week52_high"]) == (10.0, 12.0)
-    mcap = 12 * 1050 / 1e6                                       # price x SEC share count, $M
+    mcap = 12 * 105e6 / 1e6                                       # price x SEC share count, $M
     assert p["market_cap_cr"] == pytest.approx(mcap)
-    assert p["pe"] == pytest.approx(12 / (126e6 / 1050))
+    assert p["pe"] == pytest.approx(12 / (126e6 / 105e6))
     assert p["pb"] == pytest.approx(mcap / 600)
     assert p["roe_ttm_pct"] == pytest.approx(126 / 600 * 100)
     assert p["debt_to_equity_ttm"] == pytest.approx(180 / 600)
     assert p["dividend_yield_pct"] == pytest.approx(25 / mcap * 100)
     checks = research.company_report("ACME.US")["financials"]["data_checks"]
     assert checks[0].startswith("Yahoo's live quote is unavailable right now")
+
+
+def test_share_count_uses_the_freshest_reliable_source():
+    def facts(dei=None, **gaap_shares):
+        gaap = {"NetIncomeLoss": {"units": {"USD": [flow("2026-06-30", 1e9, "2026-08-01", start="2025-07-01", form="10-Q")]}}}
+        for concept, rows in gaap_shares.items():
+            gaap[concept] = {"units": {"shares": rows}}
+        out = {"facts": {"us-gaap": gaap}}
+        if dei:
+            out["facts"]["dei"] = {"EntityCommonStockSharesOutstanding": {"units": {"shares": dei}}}
+        return out
+    point = lambda end, val: {"end": end, "val": val, "filed": end, "form": "10-Q"}
+    # several share classes reported per class only: no cover total, use the balance-sheet figure
+    assert sec.shares_from_facts(facts(CommonStockSharesOutstanding=[point("2026-06-30", 12.2e9)])) == 12.2e9
+    # then the latest average share count
+    assert sec.shares_from_facts(facts(WeightedAverageNumberOfSharesOutstandingBasic=[
+        {**flow("2026-06-30", 2.4e9, "2026-08-01", start="2026-04-01", form="10-Q")}])) == 2.4e9
+    # stale figures (years before the latest report) are ignored rather than trusted
+    assert sec.shares_from_facts(facts(dei=[point("2011-04-29", 941_481)])) is None
+
+
+def test_foreign_filers_get_no_market_cap_from_mismatched_share_counts(edgar, monkeypatch):
+    monkeypatch.setattr(sec, "company_facts", lambda cik: {"facts": {"dei": FACTS["facts"]["dei"]}})   # no 10-K data
+    monkeypatch.setattr(yahoo, "profile", lambda s: (_ for _ in ()).throw(LookupError(s)))
+    monkeypatch.setattr(yahoo, "price_history", lambda s: [{"date": "d1", "close": 450.0, "volume": 1}])
+    p = research.company_report("ACME.US")["profile"]
+    assert p["price"] == 450.0 and p["market_cap_cr"] is None and p["pe"] is None

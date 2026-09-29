@@ -298,12 +298,34 @@ def shares_outstanding(symbol: str) -> float | None:
 
 
 def shares_from_facts(facts: dict) -> float | None:
-    dei = facts.get("facts", {}).get("dei", {})
-    rows = ((dei.get("EntityCommonStockSharesOutstanding") or {}).get("units") or {}).get("shares") or []
-    if not rows:
+    """Shares outstanding now, from the freshest reliable figure:
+    1. the cover page of the latest report (all classes; companies with several share classes often report
+       these per class only, which the facts API leaves out),
+    2. shares outstanding on the latest balance sheet,
+    3. the latest reported average share count.
+    Figures more than 15 months older than the company's latest financial report are ignored, since they would
+    miss later buybacks, issues and splits (Berkshire's only figures are from 2011 and 2015)."""
+    f = facts.get("facts", {})
+    gaap = f.get("us-gaap", {})
+    latest_report = max((r["end"] for c in ("NetIncomeLoss", "ProfitLoss", "Revenues")
+                         for r in ((gaap.get(c) or {}).get("units") or {}).get("USD") or []), default=None)
+    if not latest_report:
         return None
-    latest = max(r["end"] for r in rows)
-    return sum(float(r["val"]) for r in rows if r["end"] == latest)   # one row per share class
+    cutoff = date.fromisoformat(latest_report).toordinal() - 460
+
+    def fresh(rows):
+        rows = [r for r in rows if r.get("val") and date.fromisoformat(r["end"]).toordinal() >= cutoff]
+        return rows
+
+    cover = fresh(((f.get("dei", {}).get("EntityCommonStockSharesOutstanding") or {}).get("units") or {}).get("shares") or [])
+    if cover:
+        last = max(r["end"] for r in cover)
+        return sum(float(r["val"]) for r in cover if r["end"] == last)   # one row per share class
+    for concept in ("CommonStockSharesOutstanding", "WeightedAverageNumberOfSharesOutstandingBasic"):
+        rows = fresh(((gaap.get(concept) or {}).get("units") or {}).get("shares") or [])
+        if rows:
+            return float(max(rows, key=lambda r: (r["end"], r["filed"]))["val"])
+    return None
 
 
 def latest_balance(facts: dict) -> dict:

@@ -90,9 +90,9 @@ def test_full_refresh_builds_a_us_screener(us, clean_db):
     rows = {r["symbol"]: r for r in screener.run([], market="US")["rows"]}
     acme = rows["ACME.US"]
     assert acme["price"] == 12.0
-    assert acme["market_cap_cr"] == pytest.approx(12 * 1050 / 1e6)          # price x cover-page shares, $M
+    assert acme["market_cap_cr"] == pytest.approx(12 * 105e6 / 1e6)          # price x cover-page shares, $M
     assert acme["roe_pct"] == pytest.approx(120 / 550 * 100)
-    assert acme["dividend_yield_pct"] == pytest.approx(25 / (12 * 1050 / 1e6) * 100)
+    assert acme["dividend_yield_pct"] == pytest.approx(25 / (12 * 105e6 / 1e6) * 100)
     bank = rows["BANK.US"]
     assert bank["pe"] == pytest.approx(39 / (150e6 / 50e6))                  # price / trailing EPS
     assert bank["roce_pct"] is None and bank["debt_to_equity"] is None       # not meaningful for banks
@@ -169,7 +169,7 @@ def test_us_pages_fall_back_to_stored_data(us, clean_db, monkeypatch):
     r = research.company_report("ACME.US")
     p = r["profile"]
     assert p["price"] == 12.0 and p["change_pct"] == pytest.approx((12 / 11 - 1) * 100)
-    assert p["market_cap_cr"] == pytest.approx(12 * 1050 / 1e6)
+    assert p["market_cap_cr"] == pytest.approx(12 * 105e6 / 1e6)
     checks = " ".join(r["financials"]["data_checks"])
     assert "28 Sep 2026 closing price" in checks and "statements are from FinSight's last refresh" in checks
     assert r["financials"]["years"][-1]["revenue"] == pytest.approx(1200)

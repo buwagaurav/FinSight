@@ -67,6 +67,10 @@ def _us_quote_from_history(profile: dict, symbol: str, table: list[dict], histor
         shares, ttm, balance = sec.shares_from_facts(facts), sec.ttm_net_income(facts), sec.latest_balance(facts)
     except Exception:
         shares, ttm, balance = None, None, {}
+    if not table:
+        # foreign companies (20-F/ADRs): the share count is in ordinary shares but the price is per ADR, and the
+        # ratio isn't in the filings, so a market cap would be wrong by that ratio
+        shares = None
     last = table[-1] if table else {}
     # latest quarter's balance sheet when reported (as quote providers do), else the last annual one ($M)
     equity = balance["equity"] / sec.MILLION if balance.get("equity") else last.get("equity")
@@ -82,6 +86,11 @@ def _us_quote_from_history(profile: dict, symbol: str, table: list[dict], histor
         if ttm:
             profile["trailing_eps"] = ttm[0] / shares
             profile["pe"] = price / profile["trailing_eps"] if ttm[0] > 0 else None
+        if profile.get("pe") is not None and profile["pe"] < 1:
+            # a P/E under 1 means the share count and the price are on different share bases (e.g. per-class
+            # reporting); show nothing rather than a wrong market cap
+            for k in ("market_cap_cr", "pe", "pb", "dividend_yield_pct", "trailing_eps"):
+                profile[k] = None
     if ttm and equity and equity > 0:
         profile["roe_ttm_pct"] = ttm[0] / sec.MILLION / equity * 100
     if equity and equity > 0 and debt is not None and profile.get("sector") != "Financial Services":

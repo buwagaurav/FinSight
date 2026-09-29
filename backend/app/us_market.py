@@ -309,6 +309,8 @@ def metrics_for(company: dict, statements: dict, price: float | None) -> dict:
     mcap = price * shares / sec.MILLION if price and shares else None
     ttm = company.get("ttm_net_income")
     pe = price / (ttm / shares) if price and shares and ttm and ttm > 0 else None
+    if pe is not None and pe < 1:   # share count and price on different share bases: leave these blank
+        mcap = pe = None
     equity = company["equity_latest"] / sec.MILLION if company.get("equity_latest") else last.get("equity")
     dividends = -(last.get("dividends_paid") or 0)
     profile = {
