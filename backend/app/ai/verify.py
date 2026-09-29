@@ -6,9 +6,9 @@ A figure passes if some tool-returned value rounds to it at the precision the an
 import json
 import re
 
-# ₹1,23,456.78 | 48.7% | 2.67 L Cr | 15.1x | -38% | $416.2 B | $4.9 trillion
+# ₹1,23,456.78 | 48.7% | 2.67 L Cr | 15.1x | -38% | $416.2 B | $4.9 trillion  (a number after "/" is a scale, as in 40/100)
 NUMBER = re.compile(
-    r"(?<![\w.])(?P<sign>[-−])?[₹$]?\s?(?P<num>\d{1,3}(?:,\d{2,3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
+    r"(?<![\w./])(?P<sign>[-−])?[₹$]?\s?(?P<num>\d{1,3}(?:,\d{2,3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
     r"(?P<unit>\s?(?:%|x\b|L\s?Cr\b|lakh crore|Cr\b|crore|trillion\b|billion\b|million\b|bn\b|[MBT]\b))?",
     re.IGNORECASE,
 )

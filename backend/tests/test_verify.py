@@ -34,3 +34,10 @@ def test_arithmetic_recheck():
     assert len(verify.arithmetic_errors("Profit rose 25% from ₹42,147 Cr to ₹49,210 Cr.")) == 1
     assert verify.arithmetic_errors("Margin fell from 11% to 9%.") == []                   # percentage points
     assert verify.arithmetic_errors("Revenue grew 10% a year from ₹100 Cr in FY22 to ₹133.1 Cr in FY25.") == []
+
+
+def test_score_scales_are_not_treated_as_figures():
+    scores = json.dumps({"source": "S3", "overall": {"score": 40, "label": "Watchlist"}})
+    answer = 'FinSight valuation score 40/100, "Watchlist" [S3]'
+    assert verify.misattributed(answer, [scores]) == []
+    assert verify.unverified_numbers(answer, [scores]) == []

@@ -99,6 +99,14 @@ export default function AskPanel({ symbol, name }: { symbol: string; name: strin
     }
   }
 
+  function reset() {
+    setTurns([]);
+    setInput("");
+  }
+
+  const asked = new Set(turns.map((t) => t.question));
+  const remaining = SUGGESTIONS.filter((s) => !asked.has(s));
+
   function submit(e: FormEvent) {
     e.preventDefault();
     ask(input);
@@ -126,7 +134,12 @@ export default function AskPanel({ symbol, name }: { symbol: string; name: strin
 
   return (
     <Card title={<>Ask FinSight AI <span className="text-xs font-normal text-muted ml-1">about {name}</span></>}
-      action={<span className="text-xs text-muted hidden sm:block">Answers cite their sources · not investment advice</span>}>
+      action={turns.length > 0
+        ? <button type="button" onClick={reset} disabled={busy}
+            className="text-xs px-2.5 py-1 rounded-lg border border-line text-ink-2 hover:border-accent hover:text-accent disabled:opacity-50">
+            ↺ New conversation
+          </button>
+        : <span className="text-xs text-muted hidden sm:block">Answers cite their sources · not investment advice</span>}>
       {turns.length === 0 && (
         <div className="flex flex-wrap gap-2 mb-3">
           {SUGGESTIONS.map((s) => (
@@ -156,6 +169,20 @@ export default function AskPanel({ symbol, name }: { symbol: string; name: strin
         ))}
         <div ref={endRef} />
       </div>
+
+      {turns.length > 0 && !busy && remaining.length > 0 && (
+        <div className="mt-4 border-t border-line pt-3">
+          <div className="text-xs text-muted mb-2">Ask next</div>
+          <div className="flex flex-wrap gap-2">
+            {remaining.map((s) => (
+              <button key={s} onClick={() => ask(s)}
+                className="text-xs px-3 py-1.5 rounded-full border border-line hover:border-accent hover:text-accent text-ink-2 text-left">
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <form onSubmit={submit} className="flex gap-2 mt-4">
         <input value={input} onChange={(e) => setInput(e.target.value)} disabled={busy}
