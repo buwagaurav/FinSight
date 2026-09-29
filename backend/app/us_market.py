@@ -29,6 +29,7 @@ BULK_SUBMISSIONS = "https://www.sec.gov/Archives/edgar/daily-index/bulkdata/subm
 BULK_SECTORS_ABOVE = 300      # more companies than this without a sector: one bulk download beats per-company calls
 SECTOR_MINUTES = 20           # per-company lookups stop after this long and resume on the next run
 STATEMENTS_MAX_AGE_DAYS = 7
+STATEMENTS_MINUTES = 45       # the statements step stops after this long so prices and metrics still get written
 PRICE_BATCH = 250
 
 SCHEMA = """
@@ -80,6 +81,7 @@ CREATE TABLE IF NOT EXISTS us_metrics (
     updated_at            timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE us_companies ADD COLUMN IF NOT EXISTS equity_latest double precision;
+ALTER TABLE us_companies ADD COLUMN IF NOT EXISTS statements_checked_at timestamptz;
 CREATE INDEX IF NOT EXISTS us_metrics_sector_idx ON us_metrics (sector);
 CREATE INDEX IF NOT EXISTS us_metrics_mcap_idx ON us_metrics (market_cap_cr DESC NULLS LAST);
 """
@@ -128,11 +130,33 @@ def _download(url: str, path: Path, log=print) -> None:
     log(f"Downloaded {url.rsplit('/', 1)[1]} ({path.stat().st_size / 1e9:.2f} GB) in {time.time() - started:.0f}s")
 
 
-def _save_sector(symbol: str, s: dict) -> None:
+class _Batch:
+    """Collects rows and writes them `size` at a time in one transaction. The database (Neon) is a network hop
+    away from the job, so one statement per row would spend the whole run waiting on round trips."""
+
+    def __init__(self, sql: str, size: int = 250):
+        self.sql, self.size, self.rows, self.written = sql, size, [], 0
+
+    def add(self, row: tuple) -> None:
+        self.rows.append(row)
+        if len(self.rows) >= self.size:
+            self.flush()
+
+    def flush(self) -> None:
+        if self.rows:
+            with db.conn() as c, c.cursor() as cur:
+                cur.executemany(self.sql, self.rows)   # pipelined by psycopg: one round trip per batch, not per row
+            self.written += len(self.rows)
+            self.rows = []
+
+
+SECTOR_SQL = "UPDATE us_companies SET sic = %s, sector = %s, industry = %s, entity_type = %s WHERE symbol = %s"
+
+
+def _sector_row(symbol: str, s: dict) -> tuple:
     sic = int(s.get("sic") or 0) or None
-    db.execute("""UPDATE us_companies SET sic = %s, sector = %s, industry = %s, entity_type = %s WHERE symbol = %s""",
-               (sic, sec._sector(sic) if sic else None, (s.get("sicDescription") or "").title() or None,
-                s.get("entityType") or "unknown", symbol))
+    return (sic, sec._sector(sic) if sic else None, (s.get("sicDescription") or "").title() or None,
+            s.get("entityType") or "unknown", symbol)
 
 
 def fill_sectors(log=print, limit: int | None = None, source: str | None = None) -> int:
@@ -144,7 +168,8 @@ def fill_sectors(log=print, limit: int | None = None, source: str | None = None)
                         + (f" LIMIT {int(limit)}" if limit else ""))
     if not todo:
         return 0
-    done = 0
+    started = time.time()
+    batch = _Batch(SECTOR_SQL)
     if (source or ("bulk" if len(todo) > BULK_SECTORS_ABOVE else "api")) == "bulk":
         by_cik = {r["cik"]: r["symbol"] for r in todo}
         with tempfile.TemporaryDirectory() as tmp:
@@ -159,32 +184,34 @@ def fill_sectors(log=print, limit: int | None = None, source: str | None = None)
                     except ValueError:
                         continue
                     if cik in by_cik:
-                        _save_sector(by_cik[cik], json.loads(z.read(name)))
-                        done += 1
-        log(f"Sectors filled for {done:,} of {len(todo):,} companies from the bulk file")
-        return done
+                        batch.add(_sector_row(by_cik[cik], json.loads(z.read(name))))
+        batch.flush()
+        log(f"Sectors filled for {batch.written:,} of {len(todo):,} companies from the bulk file "
+            f"in {time.time() - started:.0f}s")
+        return batch.written
 
     deadline = time.monotonic() + SECTOR_MINUTES * 60
 
     def one(r):
         if time.monotonic() > deadline:
-            return False
+            return None
         try:
-            _save_sector(r["symbol"], sec.submissions.__wrapped__(r["cik"]))   # uncached: each is read once
-            return True
+            return _sector_row(r["symbol"], sec.submissions.__wrapped__(r["cik"]))   # uncached: each is read once
         except Exception as e:
             log(f"  {r['symbol']}: submissions unavailable ({e})")
-            return False
+            return None
 
     # a few requests in flight at once; sec._get still spaces them to SEC's 10-a-second limit
     with ThreadPoolExecutor(max_workers=6) as pool:
-        for i, ok in enumerate(pool.map(one, todo)):
-            done += ok
+        for i, row in enumerate(pool.map(one, todo)):
+            if row:
+                batch.add(row)
             if (i + 1) % 500 == 0:
                 log(f"  sectors: {i + 1:,} of {len(todo):,}")
-    log(f"Sectors filled for {done:,} of {len(todo):,} companies"
-        + (" (time budget reached; the rest continue next run)" if done < len(todo) and time.monotonic() > deadline else ""))
-    return done
+    batch.flush()
+    log(f"Sectors filled for {batch.written:,} of {len(todo):,} companies"
+        + (" (time budget reached; the rest continue next run)" if batch.written < len(todo) and time.monotonic() > deadline else ""))
+    return batch.written
 
 
 def _operating() -> list[dict]:
@@ -196,32 +223,62 @@ def _operating() -> list[dict]:
 
 # ---------------------------------------------------------------- statements
 
-def _store_facts(symbol: str, cik: int, facts: dict) -> bool:
-    try:
-        statements = sec.statements_from_facts(facts, cik, symbol)
-    except LookupError:
-        return False   # no US-GAAP 10-K (foreign filer, or too new)
-    ttm = sec.ttm_net_income(facts)
-    db.execute("""INSERT INTO us_statements (symbol, data, updated_at) VALUES (%s, %s, now())
-                  ON CONFLICT (symbol) DO UPDATE SET data = EXCLUDED.data, updated_at = now()""",
-               (symbol, db.jsonb(statements)))
-    db.execute("""UPDATE us_companies SET shares = %s, ttm_net_income = %s, ttm_through = %s, equity_latest = %s
-                  WHERE symbol = %s""",
-               (sec.shares_from_facts(facts), ttm[0] if ttm else None, ttm[1] if ttm else None,
-                sec.latest_balance(facts).get("equity"), symbol))
-    return True
+STATEMENTS_SQL = """INSERT INTO us_statements (symbol, data, updated_at) VALUES (%s, %s, now())
+                    ON CONFLICT (symbol) DO UPDATE SET data = EXCLUDED.data, updated_at = now()"""
+FACTS_SQL = """UPDATE us_companies SET shares = %s, ttm_net_income = %s, ttm_through = %s, equity_latest = %s,
+                   statements_checked_at = now() WHERE symbol = %s"""
+CHECKED_SQL = "UPDATE us_companies SET statements_checked_at = now() WHERE symbol = %s"
 
 
-def load_statements(source: str = "bulk", limit: int | None = None, log=print) -> int:
-    """Refresh every screened company's statements, from the SEC bulk file or (for small samples) the API."""
+def _statements_due_list(limit: int | None = None) -> list[dict]:
+    """Screenable companies whose statements weren't checked in the last STATEMENTS_MAX_AGE_DAYS, oldest first,
+    so a run that stops early is continued by the next one."""
+    rows = db.fetch_all(f"""SELECT symbol, cik FROM us_companies
+                            WHERE entity_type = 'operating' AND (sic IS NULL OR sic <> ALL(%s))
+                              AND (statements_checked_at IS NULL
+                                   OR statements_checked_at < now() - interval '{STATEMENTS_MAX_AGE_DAYS} days')
+                            ORDER BY statements_checked_at NULLS FIRST, symbol""", (list(sec.NON_OPERATING_SIC),))
+    return rows[:limit] if limit else rows
+
+
+def load_statements(source: str = "bulk", limit: int | None = None, log=print, force: bool = False,
+                    minutes: float = STATEMENTS_MINUTES) -> int:
+    """Refresh statements for companies that are due (all of them with force), from the SEC bulk file or (for
+    small samples) the API. Stops after `minutes`; whatever is left continues on the next run."""
     ensure_schema()
-    companies = _operating()[:limit] if limit else _operating()
+    if force:
+        db.execute("UPDATE us_companies SET statements_checked_at = NULL")
+    companies = _statements_due_list(limit)
+    if not companies:
+        log("Statements are up to date")
+        return 0
     by_cik = {c["cik"]: c["symbol"] for c in companies}
-    stored = 0
+    deadline = time.monotonic() + minutes * 60
+    statements, facts_rows, checked = _Batch(STATEMENTS_SQL, 100), _Batch(FACTS_SQL), _Batch(CHECKED_SQL)
+
+    def store(symbol: str, cik: int, facts: dict) -> None:
+        try:
+            st = sec.statements_from_facts(facts, cik, symbol)
+        except LookupError:
+            checked.add((symbol,))   # no US-GAAP 10-K (foreign filer, or too new): look again next week
+            return
+        ttm = sec.ttm_net_income(facts)
+        statements.add((symbol, db.jsonb(st)))
+        facts_rows.add((sec.shares_from_facts(facts), ttm[0] if ttm else None, ttm[1] if ttm else None,
+                        sec.latest_balance(facts).get("equity"), symbol))
+
+    def flush():
+        statements.flush()   # statements first: facts_rows marks the company as done
+        facts_rows.flush()
+        checked.flush()
+
+    started = time.time()
     if source == "api":
         for c in companies:
+            if time.monotonic() > deadline:
+                break
             try:
-                stored += _store_facts(c["symbol"], c["cik"], sec.company_facts.__wrapped__(c["cik"]))
+                store(c["symbol"], c["cik"], sec.company_facts.__wrapped__(c["cik"]))
             except Exception as e:
                 log(f"  {c['symbol']}: {e}")
     else:
@@ -229,21 +286,33 @@ def load_statements(source: str = "bulk", limit: int | None = None, log=print) -
             path = Path(tmp) / "companyfacts.zip"
             _download(BULK_FACTS, path, log)
             with zipfile.ZipFile(path) as z:
+                present = set()
                 for name in z.namelist():           # CIK0000320193.json
+                    if time.monotonic() > deadline:
+                        break
                     try:
                         cik = int(name[3:13])
                     except ValueError:
                         continue
                     if cik in by_cik:
-                        stored += _store_facts(by_cik[cik], cik, json.loads(z.read(name)))
-    log(f"Statements stored for {stored:,} of {len(companies):,} companies")
-    return stored
+                        present.add(cik)
+                        store(by_cik[cik], cik, json.loads(z.read(name)))
+                        if (len(present)) % 500 == 0:
+                            flush()
+                            log(f"  statements: {len(present):,} of {len(companies):,}")
+                else:
+                    for cik in set(by_cik) - present:   # SEC has no XBRL facts for them at all
+                        checked.add((by_cik[cik],))
+    flush()
+    stopped = time.monotonic() > deadline
+    log(f"Statements stored for {statements.written:,} of {len(companies):,} due companies in {time.time() - started:.0f}s"
+        + (" (time budget reached; the rest continue next run)" if stopped else ""))
+    return statements.written
 
 
 def statements_due() -> bool:
     ensure_schema()
-    row = db.fetch_one("SELECT max(updated_at) AS at FROM us_statements")
-    return not row["at"] or (datetime.now(timezone.utc) - row["at"]).days >= STATEMENTS_MAX_AGE_DAYS
+    return bool(_statements_due_list(limit=1))
 
 
 # ---------------------------------------------------------------- prices and screener metrics
@@ -288,14 +357,14 @@ def refresh_prices(log=print) -> int:
                 found.update(_closes(missing[i:i + PRICE_BATCH]))
             except Exception as e:
                 log(f"  retry batch failed: {e}")
-    with db.conn() as c:
-        for t, closes in found.items():
-            prev = float(closes.iloc[-2]) if len(closes) > 1 else None
-            c.execute("""INSERT INTO us_prices (symbol, price, previous_close, price_date, updated_at)
-                         VALUES (%s, %s, %s, %s, now())
-                         ON CONFLICT (symbol) DO UPDATE SET price = EXCLUDED.price,
-                         previous_close = EXCLUDED.previous_close, price_date = EXCLUDED.price_date, updated_at = now()""",
-                      (by_ticker[t], float(closes.iloc[-1]), prev, closes.index[-1].date()))
+    batch = _Batch("""INSERT INTO us_prices (symbol, price, previous_close, price_date, updated_at)
+                      VALUES (%s, %s, %s, %s, now())
+                      ON CONFLICT (symbol) DO UPDATE SET price = EXCLUDED.price,
+                      previous_close = EXCLUDED.previous_close, price_date = EXCLUDED.price_date, updated_at = now()""", 500)
+    for t, closes in found.items():
+        prev = float(closes.iloc[-2]) if len(closes) > 1 else None
+        batch.add((by_ticker[t], float(closes.iloc[-1]), prev, closes.index[-1].date()))
+    batch.flush()
     log(f"Prices saved for {len(found):,} of {len(tickers):,} companies"
         + (f" (retried {len(missing):,})" if missing else ""))
     return len(found)
@@ -331,25 +400,33 @@ def recompute_metrics(log=print) -> int:
     cols = ["yahoo_symbol", "name", "sector", "price", "market_cap_cr", "pe", "pb", "roe_pct", "roce_pct",
             "debt_to_equity", "revenue_cagr_pct", "profit_cagr_pct", "operating_margin_pct", "dividend_yield_pct",
             "promoter_holding_pct"]
-    with db.conn() as c:
-        for r in rows:
-            m = metrics_for(r, r["statements"], r["price"])
-            c.execute(f"""INSERT INTO us_metrics (symbol, {", ".join(cols)}, updated_at)
-                          VALUES (%s, {", ".join(["%s"] * len(cols))}, now())
-                          ON CONFLICT (symbol) DO UPDATE SET {", ".join(f"{k} = EXCLUDED.{k}" for k in cols)},
-                          updated_at = now()""", (r["symbol"], *[m[k] for k in cols]))
-        c.execute("DELETE FROM us_metrics WHERE symbol NOT IN (SELECT symbol FROM us_statements)")
+    batch = _Batch(f"""INSERT INTO us_metrics (symbol, {", ".join(cols)}, updated_at)
+                       VALUES (%s, {", ".join(["%s"] * len(cols))}, now())
+                       ON CONFLICT (symbol) DO UPDATE SET {", ".join(f"{k} = EXCLUDED.{k}" for k in cols)},
+                       updated_at = now()""", 500)
+    for r in rows:
+        m = metrics_for(r, r["statements"], r["price"])
+        batch.add((r["symbol"], *[m[k] for k in cols]))
+    batch.flush()
+    db.execute("DELETE FROM us_metrics WHERE symbol NOT IN (SELECT symbol FROM us_statements)")
     log(f"US screener metrics computed for {len(rows):,} companies")
     return len(rows)
+
+
+def _timed(log, started: float):
+    """Prefix each log line with minutes since the run started, so slow phases are easy to spot in CI logs."""
+    return lambda msg: log(f"[{(time.time() - started) / 60:5.1f} min] {msg}")
 
 
 def run(statements: bool | None = None, prices: bool = True, source: str = "bulk", limit: int | None = None,
         log=print) -> None:
     """One refresh: universe, sectors for new companies, statements when due (or forced), prices, metrics."""
+    started = time.time()
+    log = _timed(log, started)
     sync_universe(log)
     fill_sectors(log, limit=limit)
     if statements or (statements is None and statements_due()):
-        load_statements(source, limit, log)
+        load_statements(source, limit, log, force=bool(statements))
     if prices:
         refresh_prices(log)
     recompute_metrics(log)

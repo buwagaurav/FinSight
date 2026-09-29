@@ -107,7 +107,7 @@ def test_daily_run_skips_statements_until_they_are_a_week_old(us, clean_db):
     us.clear()
     us_market.run(log=lambda *_: None)
     assert us == []                                          # prices only
-    clean_db.execute("UPDATE us_statements SET updated_at = now() - interval '8 days'")
+    clean_db.execute("UPDATE us_companies SET statements_checked_at = now() - interval '8 days'")
     us_market.run(log=lambda *_: None)
     assert us == [us_market.BULK_FACTS]
 
@@ -189,3 +189,28 @@ def test_per_company_sector_lookups_stop_at_the_time_budget(us, clean_db, monkey
     us_market.sync_universe(log=lambda *_: None)
     assert us_market.fill_sectors(log=lambda *_: None) == 0
     assert clean_db.fetch_one("SELECT count(*) AS n FROM us_companies WHERE entity_type IS NULL")["n"] == 4
+
+
+def test_a_run_cut_short_is_continued_by_the_next(us, clean_db, monkeypatch):
+    us_market.sync_universe(log=lambda *_: None)
+    us_market.fill_sectors(log=lambda *_: None)
+    us_market.load_statements(log=lambda *_: None, minutes=-1)      # time budget used up before any company
+    assert clean_db.fetch_one("SELECT count(*) AS n FROM us_statements")["n"] == 0
+    assert us_market.statements_due()
+    us_market.load_statements(log=lambda *_: None)                  # next run picks up what's left
+    assert clean_db.fetch_one("SELECT count(*) AS n FROM us_statements")["n"] == 2
+    assert not us_market.statements_due()                           # both checked, including the SEC-less ones
+
+
+def test_writes_are_batched(us, clean_db, monkeypatch):
+    calls = []
+    real = us_market._Batch.flush
+
+    def counting(self):
+        if self.rows:
+            calls.append(len(self.rows))
+        real(self)
+    monkeypatch.setattr(us_market._Batch, "flush", counting)
+    us_market.run(log=lambda *_: None)
+    # one write per table per phase, not one per company: sectors, statements, facts, prices, metrics
+    assert len(calls) <= 6 and sum(calls) >= 4 + 2 + 2 + 2 + 2
