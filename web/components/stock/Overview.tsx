@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import CandleChart, { CANDLE_RANGES, CandleRange } from "@/components/stock/CandleChart";
 import Chart, { baseOption } from "@/components/Chart";
 import { Card, InfoTip, LabelBadge, SourceLink, Stat } from "@/components/ui";
 import { Company } from "@/lib/api";
@@ -8,28 +9,46 @@ import { money, pct } from "@/lib/format";
 import { useCurrency } from "@/components/CurrencyContext";
 
 const RANGES = [{ label: "1Y", days: 365 }, { label: "3Y", days: 3 * 365 }, { label: "5Y", days: 5 * 365 }];
+type Mode = "line" | "candles";
+const MODE_KEY = "finsight.chart.mode";
 
 export default function Overview({ c }: { c: Company }) {
   const [range, setRange] = useState(RANGES[0]);
+  const [mode, setMode] = useState<Mode>("line");
+  const [candleRange, setCandleRange] = useState<CandleRange>("1d");
+  const [candleChange, setCandleChange] = useState<number | null>(null);
+  useEffect(() => { try { if (localStorage.getItem(MODE_KEY) === "candles") setMode("candles"); } catch { /* not remembered */ } }, []);
+  const chooseMode = (m: Mode) => { setMode(m); try { localStorage.setItem(MODE_KEY, m); } catch { /* not remembered */ } };
   const cutoff = new Date(Date.now() - range.days * 864e5).toISOString().slice(0, 10);
   const prices = c.prices.filter((p) => p.date >= cutoff);
-  const change = prices.length > 1 ? (prices.at(-1)!.close / prices[0].close - 1) * 100 : null;
+  const lineChange = prices.length > 1 ? (prices.at(-1)!.close / prices[0].close - 1) * 100 : null;
+  const change = mode === "line" ? lineChange : candleChange;
+  const rangeLabel = mode === "line" ? range.label : CANDLE_RANGES.find((x) => x.id === candleRange)!.label;
+  const tab = (active: boolean) => `text-xs px-2.5 py-1 rounded-md ${active ? "bg-surface shadow-sm font-medium" : "text-muted hover:text-ink"}`;
   const t = c.technical;
   const cur = useCurrency();
   const trendLabel = t.trend === "Uptrend" ? "Improving" : t.trend === "Downtrend" ? "Weak" : "Stable";
 
   return (
     <div className="grid lg:grid-cols-3 gap-4">
-      <Card className="lg:col-span-2" title={<>Price <span className={`ml-2 text-xs font-medium ${change != null && change >= 0 ? "text-good" : "text-bad"}`}>{change != null && `${change >= 0 ? "▲" : "▼"} ${pct(Math.abs(change))} in ${range.label}`}</span></>}
+      <Card className="lg:col-span-2" title={<>Price <span className={`ml-2 text-xs font-medium ${change != null && change >= 0 ? "text-good" : "text-bad"}`}>{change != null && `${change >= 0 ? "▲" : "▼"} ${pct(Math.abs(change))} in ${rangeLabel}`}</span></>}
         action={
-          <div role="tablist" className="flex gap-1 bg-surface-2 rounded-lg p-0.5">
-            {RANGES.map((r) => (
-              <button key={r.label} role="tab" aria-selected={r === range} onClick={() => setRange(r)}
-                className={`text-xs px-2.5 py-1 rounded-md ${r === range ? "bg-surface shadow-sm font-medium" : "text-muted hover:text-ink"}`}>{r.label}</button>
-            ))}
+          <div className="flex flex-wrap justify-end gap-2">
+            <div role="tablist" aria-label="Chart type" className="flex gap-1 bg-surface-2 rounded-lg p-0.5">
+              {(["line", "candles"] as Mode[]).map((m) => (
+                <button key={m} role="tab" aria-selected={mode === m} onClick={() => chooseMode(m)} className={tab(mode === m)}>
+                  {m === "line" ? "Line" : "Candles"}
+                </button>
+              ))}
+            </div>
+            <div role="tablist" aria-label="Range" className="flex gap-1 bg-surface-2 rounded-lg p-0.5">
+              {mode === "line"
+                ? RANGES.map((r) => <button key={r.label} role="tab" aria-selected={r === range} onClick={() => setRange(r)} className={tab(r === range)}>{r.label}</button>)
+                : CANDLE_RANGES.map((r) => <button key={r.id} role="tab" aria-selected={r.id === candleRange} onClick={() => setCandleRange(r.id)} className={tab(r.id === candleRange)}>{r.label}</button>)}
+            </div>
           </div>
         }>
-        <Chart height={300} label={`Share price over ${range.label}`} build={(k) => {
+        {mode === "candles" ? <CandleChart symbol={c.profile.symbol} range={candleRange} onChange={setCandleChange} /> : <Chart height={300} label={`Share price over ${range.label}`} build={(k) => {
           const base = baseOption(k);
           return {
             ...base,
@@ -43,7 +62,7 @@ export default function Overview({ c }: { c: Company }) {
               areaStyle: { color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: k.s1 + "33" }, { offset: 1, color: k.s1 + "00" }] } },
             }],
           };
-        }} />
+        }} />}
         <SourceLink name={c.profile.source.name} url={c.profile.source.url} when="prices may be delayed" />
       </Card>
 

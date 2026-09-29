@@ -25,3 +25,17 @@ def ttl_cache(seconds: int):
         return wrapper
 
     return decorator
+
+
+def cached(key, seconds: float, compute):
+    """Value for `key` if computed in the last `seconds`, else compute and store it. For caches whose lifetime
+    depends on the arguments (e.g. 30 s for 1-minute candles, an hour for weekly ones)."""
+    now = time.time()
+    with _lock:
+        hit = _store.get(key)
+        if hit and now - hit[0] < seconds:
+            return hit[1]
+    value = compute()
+    with _lock:
+        _store[key] = (now, value)
+    return value

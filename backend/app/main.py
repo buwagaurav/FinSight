@@ -12,7 +12,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from app import auth, gmp, loader, research, screener, watchlist
+from app import auth, candles, gmp, loader, research, screener, watchlist
 from app.ai import assistant, filings, llm, report, screen_nl
 from app.providers import nse, sec, yahoo
 
@@ -84,6 +84,25 @@ def company(symbol: str):
         return research.company_report(symbol)
     except LookupError:
         raise HTTPException(404, f"No listed company found for {yahoo.normalize_symbol(symbol)}")
+
+
+@app.get("/api/company/{symbol}/candles")
+def company_candles(symbol: str, range: Literal[tuple(candles.RANGES)] = "1d"):  # type: ignore[valid-type]
+    try:
+        return candles.candles(symbol, range)
+    except LookupError:
+        raise HTTPException(404, f"No price data for {symbol}")
+
+
+@app.get("/api/health/storage")
+def health_storage():
+    """How much of the database is used, and by what (sizes only; no data)."""
+    from app import db
+    total = db.fetch_one("SELECT pg_database_size(current_database()) AS bytes")["bytes"]
+    tables = db.fetch_all("""SELECT relname AS table, pg_total_relation_size(relid) AS bytes, n_live_tup AS rows
+                             FROM pg_stat_user_tables ORDER BY 2 DESC LIMIT 15""")
+    return {"database_mb": round(total / 1e6, 1),
+            "tables": [{"table": t["table"], "mb": round(t["bytes"] / 1e6, 1), "rows": t["rows"]} for t in tables]}
 
 
 @app.get("/api/company/{symbol}/news")
