@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS us_companies (
     shares          double precision,           -- latest cover-page share count (all classes)
     ttm_net_income  double precision,           -- $, last twelve months
     ttm_through     date,
+    equity_latest   double precision,           -- $, most recent balance sheet (latest 10-Q/10-K)
     added_at        timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS us_statements (
@@ -78,6 +79,7 @@ CREATE TABLE IF NOT EXISTS us_metrics (
     promoter_holding_pct  double precision,     -- not available for US companies; always NULL
     updated_at            timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE us_companies ADD COLUMN IF NOT EXISTS equity_latest double precision;
 CREATE INDEX IF NOT EXISTS us_metrics_sector_idx ON us_metrics (sector);
 CREATE INDEX IF NOT EXISTS us_metrics_mcap_idx ON us_metrics (market_cap_cr DESC NULLS LAST);
 """
@@ -203,8 +205,10 @@ def _store_facts(symbol: str, cik: int, facts: dict) -> bool:
     db.execute("""INSERT INTO us_statements (symbol, data, updated_at) VALUES (%s, %s, now())
                   ON CONFLICT (symbol) DO UPDATE SET data = EXCLUDED.data, updated_at = now()""",
                (symbol, db.jsonb(statements)))
-    db.execute("UPDATE us_companies SET shares = %s, ttm_net_income = %s, ttm_through = %s WHERE symbol = %s",
-               (sec.shares_from_facts(facts), ttm[0] if ttm else None, ttm[1] if ttm else None, symbol))
+    db.execute("""UPDATE us_companies SET shares = %s, ttm_net_income = %s, ttm_through = %s, equity_latest = %s
+                  WHERE symbol = %s""",
+               (sec.shares_from_facts(facts), ttm[0] if ttm else None, ttm[1] if ttm else None,
+                sec.latest_balance(facts).get("equity"), symbol))
     return True
 
 
@@ -305,7 +309,7 @@ def metrics_for(company: dict, statements: dict, price: float | None) -> dict:
     mcap = price * shares / sec.MILLION if price and shares else None
     ttm = company.get("ttm_net_income")
     pe = price / (ttm / shares) if price and shares and ttm and ttm > 0 else None
-    equity = last.get("equity")
+    equity = company["equity_latest"] / sec.MILLION if company.get("equity_latest") else last.get("equity")
     dividends = -(last.get("dividends_paid") or 0)
     profile = {
         "symbol": company["symbol"], "name": company["name"], "sector": company.get("sector"), "price": price,
@@ -319,7 +323,7 @@ def metrics_for(company: dict, statements: dict, price: float | None) -> dict:
 
 def recompute_metrics(log=print) -> int:
     ensure_schema()
-    rows = db.fetch_all("""SELECT c.symbol, c.name, c.sector, c.shares, c.ttm_net_income, s.data AS statements,
+    rows = db.fetch_all("""SELECT c.symbol, c.name, c.sector, c.shares, c.ttm_net_income, c.equity_latest, s.data AS statements,
                                   p.price
                            FROM us_companies c JOIN us_statements s USING (symbol) LEFT JOIN us_prices p USING (symbol)""")
     cols = ["yahoo_symbol", "name", "sector", "price", "market_cap_cr", "pe", "pb", "roe_pct", "roce_pct",

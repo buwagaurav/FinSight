@@ -203,3 +203,24 @@ def test_share_counts_are_put_on_the_latest_split_basis(edgar, monkeypatch):
     got = {fy: st["income"][fy]["Basic Average Shares"] for fy in st["income"]}
     assert got["FY25"] == 24.4e9 and got["FY24"] == 24.6e9 and got["FY23"] == pytest.approx(25e9)
     assert got["FY22"] == pytest.approx(25e9) and got["FY21"] == pytest.approx(24e9)    # scaled x10 via FY23 overlap
+
+
+def test_us_quote_is_rebuilt_from_price_history_when_yahoo_quote_fails(edgar, monkeypatch):
+    def refused(symbol):
+        raise LookupError(symbol)   # what yfinance's quote does when Yahoo blocks the server
+    monkeypatch.setattr(yahoo, "profile", refused)
+    closes = [10.0] * 250 + [11.0, 12.0]
+    monkeypatch.setattr(yahoo, "price_history", lambda s: [{"date": f"d{i:04d}", "close": c, "volume": 1} for i, c in enumerate(closes)])
+    monkeypatch.setattr(sec, "ttm_net_income", lambda facts: (126e6, "2026-06-30"))
+    p = research.company_report("ACME.US")["profile"]
+    assert p["price"] == 12.0 and p["change_pct"] == pytest.approx((12 / 11 - 1) * 100)
+    assert (p["week52_low"], p["week52_high"]) == (10.0, 12.0)
+    mcap = 12 * 1050 / 1e6                                       # price x SEC share count, $M
+    assert p["market_cap_cr"] == pytest.approx(mcap)
+    assert p["pe"] == pytest.approx(12 / (126e6 / 1050))
+    assert p["pb"] == pytest.approx(mcap / 600)
+    assert p["roe_ttm_pct"] == pytest.approx(126 / 600 * 100)
+    assert p["debt_to_equity_ttm"] == pytest.approx(180 / 600)
+    assert p["dividend_yield_pct"] == pytest.approx(25 / mcap * 100)
+    checks = research.company_report("ACME.US")["financials"]["data_checks"]
+    assert checks[0].startswith("Yahoo's live quote is unavailable right now")

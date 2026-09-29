@@ -54,21 +54,50 @@ def _stored_us_quote(symbol: str) -> dict | None:
     return row
 
 
+def _us_quote_from_history(profile: dict, symbol: str, table: list[dict], history: list[dict]) -> str | None:
+    """Price and ratios for a US company when Yahoo's quote endpoint refuses us but its price history doesn't:
+    the latest close from the history, everything else from SEC filings (as the US screener computes them)."""
+    closes = [p["close"] for p in history]
+    price, prev = closes[-1], (closes[-2] if len(closes) > 1 else None)
+    year = closes[-252:]
+    profile.update(price=price, previous_close=prev, change_pct=(price / prev - 1) * 100 if prev else None,
+                   week52_high=max(year), week52_low=min(year))
+    try:
+        facts = sec.company_facts(sec.lookup(symbol)["cik"])
+        shares, ttm, balance = sec.shares_from_facts(facts), sec.ttm_net_income(facts), sec.latest_balance(facts)
+    except Exception:
+        shares, ttm, balance = None, None, {}
+    last = table[-1] if table else {}
+    # latest quarter's balance sheet when reported (as quote providers do), else the last annual one ($M)
+    equity = balance["equity"] / sec.MILLION if balance.get("equity") else last.get("equity")
+    debt = (balance["total_debt"] / sec.MILLION if balance.get("total_debt") is not None
+            else last.get("total_debt")) if balance else last.get("total_debt")
+    if shares:
+        mcap = price * shares / sec.MILLION
+        profile["market_cap_cr"] = mcap
+        dividends = -(last.get("dividends_paid") or 0)
+        profile["dividend_yield_pct"] = dividends / mcap * 100 if dividends > 0 else 0.0
+        if equity and equity > 0:
+            profile["pb"] = mcap / equity
+        if ttm:
+            profile["trailing_eps"] = ttm[0] / shares
+            profile["pe"] = price / profile["trailing_eps"] if ttm[0] > 0 else None
+    if ttm and equity and equity > 0:
+        profile["roe_ttm_pct"] = ttm[0] / sec.MILLION / equity * 100
+    if equity and equity > 0 and debt is not None and profile.get("sector") != "Financial Services":
+        profile["debt_to_equity_ttm"] = debt / equity
+    return ("Yahoo's live quote is unavailable right now: the price is the latest close from Yahoo's price history, "
+            "and market cap and ratios are computed from SEC filings.")
+
+
 def _us_inputs(symbol: str) -> tuple[dict, dict, str | None]:
     """Profile (Yahoo quote, or SEC-only) and SEC statements for a US listing. LookupError if not listed."""
     sec.lookup(symbol)
     note = None
     try:
         profile = dict(yahoo.profile(symbol))
-    except Exception:
+    except Exception:   # price and ratios are filled in by company_report from price history or stored data
         profile = _us_profile_from_sec(symbol)
-        stored = _stored_us_quote(symbol)
-        if stored:
-            profile.update({k: v for k, v in stored.items() if k != "price_date"})
-            note = (f"Live prices from Yahoo Finance are unavailable right now; showing the {stored['price_date']:%d %b %Y} "
-                    "closing price from FinSight's daily refresh.")
-        else:
-            note = "Live prices from Yahoo Finance are unavailable right now; fundamentals below are from SEC filings."
     if not profile.get("sector"):
         profile["sector"] = sec.industry(symbol)["sector"]
     try:
@@ -111,6 +140,16 @@ def company_report(symbol: str) -> dict:
         history = yahoo.price_history(symbol)
     except Exception:
         history = []  # chart and trend show "insufficient data"; fundamentals still work
+    if sec.is_us(symbol) and profile.get("price") is None:   # Yahoo's quote failed
+        note = None
+        if history:
+            note = _us_quote_from_history(profile, symbol, table, history)
+        elif stored := _stored_us_quote(symbol):
+            profile.update({k: v for k, v in stored.items() if k != "price_date"})
+            note = (f"Live prices from Yahoo Finance are unavailable right now; showing the {stored['price_date']:%d %b %Y} "
+                    "closing price from FinSight's daily refresh.")
+        note = note or "Live prices from Yahoo Finance are unavailable right now; fundamentals below are from SEC filings."
+        stale_note = f"{note} {stale_note}" if stale_note else note
     technical = technicals.summarize(history, "$" if sec.is_us(symbol) else "₹")
     pe_history = valuation.historical_pe(table, history)
     checks = fundamentals.data_checks(table, profile, statements.get("converted_from"))

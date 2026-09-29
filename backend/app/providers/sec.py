@@ -306,6 +306,34 @@ def shares_from_facts(facts: dict) -> float | None:
     return sum(float(r["val"]) for r in rows if r["end"] == latest)   # one row per share class
 
 
+def latest_balance(facts: dict) -> dict:
+    """Equity and total debt from the most recent balance sheet (latest 10-Q or 10-K), for ratios quoted
+    "today" such as P/B and debt/equity. {} if not reported."""
+    gaap = facts.get("facts", {}).get("us-gaap", {})
+
+    def by_end(concepts):
+        vals: dict[str, tuple[str, float]] = {}
+        for c in concepts:
+            for r in ((gaap.get(c) or {}).get("units") or {}).get("USD") or []:
+                if r.get("form") in ANNUAL_FORMS | {"10-Q", "10-Q/A"} and "start" not in r:
+                    if r["end"] not in vals or r["filed"] > vals[r["end"]][0]:
+                        vals[r["end"]] = (r["filed"], float(r["val"]))
+            if vals:
+                break   # first concept the company uses
+        return {end: v for end, (_, v) in vals.items()}
+
+    b = CONCEPTS["balance"]
+    equity = by_end(b["Stockholders Equity"])
+    if not equity:
+        return {}
+    end = max(equity)
+    lt, ltn, ltc, st = (by_end(b[k]).get(end) for k in
+                        ("_long_term_debt", "_long_term_debt_noncurrent", "_long_term_debt_current", "_short_term_debt"))
+    debt = lt if lt is not None else ((ltn or 0) + (ltc or 0) if ltn is not None or ltc is not None else None)
+    total_debt = (debt or 0) + (st or 0) if debt is not None or st is not None else None
+    return {"as_of": end, "equity": equity[end], "total_debt": total_debt}
+
+
 def ttm_net_income(facts: dict) -> tuple[float, str] | None:
     """Net income for the last twelve months and the date it runs to: the latest fiscal year, rolled forward
     with the latest 10-Q (this year's year-to-date minus the same period last year, both from that 10-Q)."""

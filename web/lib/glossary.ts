@@ -1,15 +1,15 @@
 /** Plain-language explanations shown next to every metric, so a first-time investor is never stuck. */
 export const GLOSSARY: Record<string, string> = {
   "Market cap": "Total value of all the company's shares at today's price.",
-  "P/E": "Price ÷ earnings per share: how many rupees you pay for ₹1 of yearly profit. Lower can mean cheaper, or that the market expects slower growth.",
+  "P/E": "Price ÷ earnings per share: how much you pay for each 1 (₹ or $) of yearly profit. Lower can mean cheaper, or that the market expects slower growth.",
   "P/B": "Price ÷ book value per share: how the market values the company against its net assets.",
   "EV/EBITDA": "Enterprise value (market cap + debt − cash) ÷ EBITDA. Useful for comparing companies with different debt levels.",
   "PEG": "P/E ÷ earnings growth rate. Around 1 suggests the price is in line with growth; well above 2 suggests you are paying up.",
   "Dividend yield": "Yearly dividend as a percentage of the share price.",
-  ROE: "Return on equity: profit earned on every ₹100 that shareholders have in the business. Above 15% is generally considered good.",
+  ROE: "Return on equity: profit earned on every 100 (₹ or $) that shareholders have in the business. Above 15% is generally considered good.",
   ROCE: "Return on capital employed: profit before interest and tax earned on all capital (equity + debt). Shows how well the business uses its money.",
   "Debt / Equity": "Total borrowings ÷ shareholders' money. Below 0.5 is usually comfortable for non-financial companies.",
-  "Operating margin": "Operating profit as a percentage of revenue: how much of each ₹100 of sales is left after running costs.",
+  "Operating margin": "Operating profit as a percentage of revenue: how much of every 100 (₹ or $) of sales is left after running costs.",
   "Net margin": "Net profit as a percentage of revenue, after interest and tax.",
   "Cash conversion": "Operating cash flow ÷ net profit. Near or above 1 means reported profits are turning into real cash.",
   "Free cash flow": "Cash from operations minus capital spending: money available to pay dividends, cut debt or reinvest.",
