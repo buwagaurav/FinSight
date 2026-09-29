@@ -20,7 +20,7 @@ export default function Nav() {
   const landing = path === "/";
   return (
     <header className="sticky top-0 z-30 bg-bg/90 backdrop-blur border-b border-line">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center gap-2 sm:gap-4">
+      <div className="max-w-[1440px] mx-auto px-4 sm:px-6 h-16 flex items-center gap-2 sm:gap-4">
         <Link href="/" className="shrink-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent" aria-label="FinSight home">
           <Logo />
         </Link>

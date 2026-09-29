@@ -22,9 +22,9 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         <UserProvider user={user} authEnabled={authEnabled}>
         <WatchlistProvider>
         <Nav />
-        <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-6">{children}</main>
+        <main className="flex-1 w-full max-w-[1440px] mx-auto px-4 sm:px-6 py-6">{children}</main>
         <footer className="border-t border-line text-xs text-muted">
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+          <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
             <p>
               FinSight is a research tool, not investment advice. Data from NSE and Yahoo Finance may be delayed or
               incomplete; verify important figures against company filings.
