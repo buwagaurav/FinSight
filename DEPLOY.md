@@ -23,6 +23,10 @@ In the GitHub repo: **Settings > Secrets and variables > Actions > New repositor
 name `DATABASE_URL`, value = the Neon connection string. The "Refresh market data" workflow then runs twice a day;
 **Actions > Refresh market data > Run workflow** runs it now.
 
+Its `us-market` job fills the US screener. The first run takes the longest (two SEC bulk files of ~1.5 GB each, then
+prices for ~4,000 companies); after that it refreshes prices every run and statements once a week. Until the first run
+finishes, the Screener's US tab says the data hasn't been loaded yet. The US tables add roughly 50 MB to Neon.
+
 ## 3. API: Render
 1. Sign up at https://render.com with GitHub, then **New > Blueprint** and pick this repo (it reads `render.yaml`).
 2. Fill in the values it asks for:

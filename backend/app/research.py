@@ -31,6 +31,29 @@ def _us_profile_from_sec(symbol: str) -> dict:
             "source": {"name": "SEC EDGAR", "url": f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={info['cik']}"}}
 
 
+def _stored_us(symbol: str) -> dict | None:
+    try:
+        row = db.fetch_one("SELECT data FROM us_statements WHERE symbol = %s", (symbol,))
+    except Exception:   # no database, or the US tables don't exist yet
+        return None
+    return row["data"] if row else None
+
+
+def _stored_us_quote(symbol: str) -> dict | None:
+    """Last close and screener multiples saved by the daily US refresh (app.us_market)."""
+    try:
+        row = db.fetch_one("""SELECT p.price, p.previous_close, p.price_date, m.market_cap_cr, m.pe, m.pb,
+                                     m.dividend_yield_pct
+                              FROM us_prices p LEFT JOIN us_metrics m USING (symbol) WHERE p.symbol = %s""", (symbol,))
+    except Exception:
+        return None
+    if not row:
+        return None
+    prev = row.pop("previous_close")
+    row["change_pct"] = (row["price"] / prev - 1) * 100 if prev else None
+    return row
+
+
 def _us_inputs(symbol: str) -> tuple[dict, dict, str | None]:
     """Profile (Yahoo quote, or SEC-only) and SEC statements for a US listing. LookupError if not listed."""
     sec.lookup(symbol)
@@ -39,12 +62,26 @@ def _us_inputs(symbol: str) -> tuple[dict, dict, str | None]:
         profile = dict(yahoo.profile(symbol))
     except Exception:
         profile = _us_profile_from_sec(symbol)
-        note = "Live prices from Yahoo Finance are unavailable right now; fundamentals below are from SEC filings."
+        stored = _stored_us_quote(symbol)
+        if stored:
+            profile.update({k: v for k, v in stored.items() if k != "price_date"})
+            note = (f"Live prices from Yahoo Finance are unavailable right now; showing the {stored['price_date']:%d %b %Y} "
+                    "closing price from FinSight's daily refresh.")
+        else:
+            note = "Live prices from Yahoo Finance are unavailable right now; fundamentals below are from SEC filings."
     if not profile.get("sector"):
         profile["sector"] = sec.industry(symbol)["sector"]
     try:
         statements = sec.annual_statements(symbol)
     except LookupError:
+        statements = None
+    except Exception:   # SEC unreachable: use the statements the nightly US refresh stored, if any
+        statements = _stored_us(symbol)
+        if statements:
+            note = ((note + " ") if note else "") + "SEC EDGAR is unavailable right now; statements are from FinSight's last refresh."
+        else:
+            raise
+    if statements is None:
         statements = {"income": {}, "balance": {}, "cashflow": {}, "converted_from": None, "scale": sec.MILLION}
         note = ((note + " ") if note else "") + (
             "This company doesn't file US-GAAP annual reports (10-K) with the SEC, typically because it is a "

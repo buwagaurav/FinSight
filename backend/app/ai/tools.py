@@ -79,10 +79,12 @@ TOOLS = [
     },
     {
         "name": "run_screen",
-        "description": "Screen all NSE stocks (Indian market only) with numeric filters (percent fields in %, market cap in ₹ Cr).",
+        "description": "Screen all NSE stocks (market IN, market cap in ₹ Cr) or US-listed stocks (market US, market cap "
+                       "in $ M) with numeric filters (percent fields in %).",
         "input_schema": {
             "type": "object",
             "properties": {
+                "market": {"type": "string", "enum": ["IN", "US"], "description": "Default IN"},
                 "filters": {"type": "array", "items": {
                     "type": "object",
                     "properties": {
@@ -271,7 +273,8 @@ def _compare(args, sources: Sources):
 
 
 def _screen(args, sources: Sources):
-    result = screener.run(args["filters"], args.get("sort") or "market_cap_cr", True, args.get("sectors"))
+    result = screener.run(args["filters"], args.get("sort") or "market_cap_cr", True, args.get("sectors"),
+                          "US" if args.get("market") == "US" else "IN")
     sid = sources.add("FinSight screener", None, f"{result['universe']}: {result['query']}")
     keep = ("symbol", "name", "market_cap_cr", "pe", "roe_pct", "debt_to_equity", "profit_cagr_pct")
     rows = [{k: r[k] for k in keep} for r in result["rows"][:10]]

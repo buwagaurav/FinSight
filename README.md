@@ -45,6 +45,7 @@ offline and never touch your data. GitHub Actions runs both suites on every push
 | Annual statements | Yahoo Finance | SEC EDGAR XBRL company facts (10-K) |
 | Price, quote, news | Yahoo Finance | Yahoo Finance |
 | Filings | NSE corporate announcements | SEC EDGAR filings (8-K, 10-Q, 10-K, proxy) |
+| Screener refresh | `python -m app.loader` (per company) | `python -m app.us_market`: SEC bulk files weekly, batched prices daily |
 
 SEC EDGAR is free and needs no key; it asks for a User-Agent with a contact email. FinSight sends
 `FinSight finsightapp.support@gmail.com`; override it with `FINSIGHT_SEC_USER_AGENT`.
@@ -80,10 +81,12 @@ Product rules the code follows:
 - Yahoo's reported EPS is not always restated for bonus issues, so EPS is derived from net profit ÷ average shares.
 - No free official GMP feed exists. GMP is entered with its source via the IPO page or `POST /api/ipos/{symbol}/gmp`.
 - The first full load of ~2,550 companies can take a few hours when Yahoo rate-limits; the screener shows its coverage meanwhile.
-- US stocks (symbols like `AAPL.US`): company pages, filings, AI and the watchlist work; the screener covers NSE only.
-  Statements come from SEC EDGAR 10-K filings (last 5 years, share counts split-adjusted); foreign companies that
-  file 20-F under IFRS show a quote but no statements. Prices come from Yahoo; if Yahoo is unavailable, US pages show
-  SEC fundamentals without a live price (Stooq, the planned backup, now blocks non-browser downloads).
+- US stocks (symbols like `AAPL.US`): statements come from SEC EDGAR 10-K filings (last 5 years, share counts
+  split-adjusted); foreign companies that file 20-F under IFRS show a quote but no statements. Sectors are mapped from
+  SEC industry codes, so a few differ from Yahoo's (e.g. Accenture is Industrials). If Yahoo is unavailable, US pages
+  show the last close from the daily refresh (Stooq, the planned backup, now blocks non-browser downloads).
+- The US screener covers ~4,000 NYSE/Nasdaq/Cboe operating companies (no shells, funds or trusts). P/E uses trailing
+  twelve-month earnings from SEC filings, so it can differ slightly from Yahoo's on the company page.
 
 ## Roadmap
 

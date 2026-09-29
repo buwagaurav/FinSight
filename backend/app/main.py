@@ -158,6 +158,7 @@ class Filter(BaseModel):
 
 
 class ScreenRequest(BaseModel):
+    market: Literal["IN", "US"] = "IN"
     filters: list[Filter] = []
     sectors: list[Literal[tuple(screener.SECTORS)]] = []  # type: ignore[valid-type]
     sort: str | None = "market_cap_cr"
@@ -165,8 +166,8 @@ class ScreenRequest(BaseModel):
 
 
 @app.get("/api/screener/fields")
-def screener_fields():
-    return screener.FIELDS
+def screener_fields(market: Literal["IN", "US"] = "IN"):
+    return screener.fields(market)
 
 
 @app.get("/api/screener/sectors")
@@ -176,6 +177,7 @@ def screener_sectors():
 
 class NLScreenRequest(BaseModel):
     query: str = Field(min_length=3, max_length=500)
+    market: Literal["IN", "US"] = "IN"
 
 
 @app.post("/api/screener/parse")
@@ -184,7 +186,7 @@ def parse_screen(req: NLScreenRequest, user: dict = Depends(auth.require_user)):
         raise HTTPException(503, f"No credentials for {llm.model_spec('screen')}.")
     auth.consume(user, "screen")
     try:
-        return screen_nl.parse(req.query)
+        return screen_nl.parse(req.query, req.market)
     except llm.AIUnavailable as e:
         raise HTTPException(503, str(e))
     except llm.AIRefused as e:
@@ -193,7 +195,10 @@ def parse_screen(req: NLScreenRequest, user: dict = Depends(auth.require_user)):
 
 @app.post("/api/screener")
 def run_screen(req: ScreenRequest):
-    return screener.run([f.model_dump() for f in req.filters], req.sort, req.descending, req.sectors)
+    try:
+        return screener.run([f.model_dump() for f in req.filters], req.sort, req.descending, req.sectors, req.market)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
 
 
 class ChatTurn(BaseModel):

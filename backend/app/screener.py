@@ -4,6 +4,7 @@ Metrics are computed with the same fundamentals engine as the company page (metr
 `metrics` table by app.loader, so a screen is a single SQL query however many companies are loaded.
 """
 from app import db
+from app.providers import sec
 from app.analytics import fundamentals
 
 FIELDS = {
@@ -23,6 +24,15 @@ SECTORS = ["Basic Materials", "Communication Services", "Consumer Cyclical", "Co
            "Financial Services", "Healthcare", "Industrials", "Real Estate", "Technology", "Utilities"]
 OPS = {">": ">", ">=": ">=", "<": "<", "<=": "<="}
 MAX_ROWS = 200
+MARKETS = {"IN": "metrics", "US": "us_metrics"}   # table per market (whitelisted: names go into SQL)
+US_ONLY_MISSING = {"promoter_holding_pct"}         # not reported for US companies
+
+
+def fields(market: str = "IN") -> dict[str, str]:
+    """Filterable fields and their labels, in the market's units."""
+    if market == "US":
+        return {k: ("Market cap ($ M)" if k == "market_cap_cr" else v) for k, v in FIELDS.items() if k not in US_ONLY_MISSING}
+    return FIELDS
 
 
 def metrics_row(profile: dict, table: list[dict]) -> dict:
@@ -49,9 +59,20 @@ def metrics_row(profile: dict, table: list[dict]) -> dict:
     }
 
 
-def coverage() -> dict:
+def coverage(market: str = "IN") -> dict:
     """How much of the market is loaded. `pending` is work still to do; `unavailable` are companies the data
     source has nothing for (very new listings, rights-entitlement lines), which never count as "still loading"."""
+    if market == "US":
+        from app import us_market
+        us_market.ensure_schema()
+        row = db.fetch_one("""
+            SELECT (SELECT count(*) FROM us_companies WHERE entity_type = 'operating'
+                      AND (sic IS NULL OR sic <> ALL(%(skip)s))) AS listed,
+                   (SELECT count(*) FROM us_metrics) AS loaded,
+                   (SELECT count(*) FROM us_companies WHERE entity_type IS NULL) AS pending,
+                   (SELECT max(updated_at) FROM us_metrics) AS updated_at""", {"skip": list(sec.NON_OPERATING_SIC)})
+        return {"listed": row["listed"], "loaded": row["loaded"], "pending": row["pending"], "unavailable": [],
+                "updated_at": row["updated_at"].timestamp() if row["updated_at"] else None}
     row = db.fetch_one("""
         SELECT (SELECT count(*) FROM companies) AS listed,
                (SELECT count(*) FROM metrics) AS loaded,
@@ -76,31 +97,36 @@ def _public(r: dict) -> dict:
     return {"symbol": r["yahoo_symbol"], **out}
 
 
-def run(filters: list[dict], sort: str | None = None, descending: bool = True, sectors: list[str] | None = None) -> dict:
+def run(filters: list[dict], sort: str | None = None, descending: bool = True, sectors: list[str] | None = None,
+        market: str = "IN") -> dict:
+    table = MARKETS[market]
+    allowed = fields(market)
     where, params = [], []
     if sectors:
         where.append("sector = ANY(%s)")
         params.append(sectors)
     for flt in filters:
-        if flt["field"] not in FIELDS or flt["op"] not in OPS:
+        if flt["field"] not in allowed or flt["op"] not in OPS:
             raise ValueError(f"Unsupported filter {flt}")
         where.append(f'{flt["field"]} IS NOT NULL AND {flt["field"]} {OPS[flt["op"]]} %s')  # names are whitelisted
         params.append(flt["value"])
     clause = ("WHERE " + " AND ".join(where)) if where else ""
     order = sort if sort in FIELDS else "market_cap_cr"
     direction = "DESC" if descending else "ASC"
+    cov = coverage(market)   # first: creates the US tables if this server hasn't yet
     with db.conn() as c:
-        count = c.execute(f"SELECT count(*) AS n FROM metrics {clause}", params).fetchone()["n"]
-        rows = c.execute(f"SELECT * FROM metrics {clause} ORDER BY {order} {direction} NULLS LAST LIMIT {MAX_ROWS}",
+        count = c.execute(f"SELECT count(*) AS n FROM {table} {clause}", params).fetchone()["n"]
+        rows = c.execute(f"SELECT * FROM {table} {clause} ORDER BY {order} {direction} NULLS LAST LIMIT {MAX_ROWS}",
                          params).fetchall()
-    cov = coverage()
+    exchange = "US" if market == "US" else "NSE"
     return {
-        "universe": f"{cov['loaded']:,} of {cov['listed']:,} NSE stocks loaded" if cov["listed"] else "No stocks loaded yet",
+        "market": market,
+        "universe": f"{cov['loaded']:,} of {cov['listed']:,} {exchange} stocks loaded" if cov["listed"] else "No stocks loaded yet",
         "coverage": cov,
         "built_at": cov["updated_at"],
         "count": count,
         "shown": len(rows),
         "query": " AND ".join(([f"Sector in ({', '.join(sectors)})"] if sectors else [])
-                              + [f"{FIELDS[f['field']]} {f['op']} {f['value']}" for f in filters]) or "All stocks",
+                              + [f"{allowed[f['field']]} {f['op']} {f['value']}" for f in filters]) or "All stocks",
         "rows": [_public(r) for r in rows],
     }

@@ -1,10 +1,10 @@
-# Keeps every NSE company's prices, ratios and statements fresh in the Neon database.
+# Keeps every NSE and US company's prices, ratios and statements fresh in the Neon database.
 # Needs the repository secret DATABASE_URL (Settings > Secrets and variables > Actions).
 name: Refresh market data
 
 on:
   schedule:
-    - cron: "30 20 * * *"   # 02:00 IST, after markets close
+    - cron: "30 20 * * *"   # 02:00 IST: after Indian markets close, and just after the US close
     - cron: "30 8 * * *"    # 14:00 IST, catches up anything a rate limit left behind
   workflow_dispatch: {}      # "Run workflow" button for a manual refresh
 
@@ -54,3 +54,24 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: python -m app.docs --top 50
+
+  us-market:
+    # US screener: SEC statements weekly (one ~1.4 GB bulk file), closing prices every run (batched Yahoo requests).
+    # The first run also looks up each company's SEC industry code once, so it takes longest (~40 min).
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Refresh US companies, statements when due, prices and screener metrics
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python -m app.us_market

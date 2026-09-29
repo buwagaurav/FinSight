@@ -5,7 +5,7 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Card, ErrorBox, Skeleton } from "@/components/ui";
 import { AiStatus, api, ScreenFilter, ScreenResult } from "@/lib/api";
-import { crore, DASH, num, pct, rupees } from "@/lib/format";
+import { amount, Currency, DASH, money, num, pct } from "@/lib/format";
 import SignInPrompt from "@/components/SignInPrompt";
 import StarButton from "@/components/StarButton";
 import { useUser } from "@/components/UserContext";
@@ -34,8 +34,16 @@ const PRESETS: Record<string, { title: string; filters: ScreenFilter[] }> = {
     { field: "dividend_yield_pct", op: ">", value: 2 }, { field: "debt_to_equity", op: "<", value: 1 }] },
 };
 
-const COLUMNS: { key: string; label: string; render: (v: number | null) => string }[] = [
-  { key: "market_cap_cr", label: "Market cap", render: crore },
+type Market = "IN" | "US";
+const MARKETS: { id: Market; label: string; hint: string }[] = [
+  { id: "IN", label: "India", hint: "NSE" },
+  { id: "US", label: "US", hint: "NYSE · Nasdaq" },
+];
+const MARKET_KEY = "finsight.screener.market";
+const currencyFor = (m: Market): Currency => (m === "US" ? "USD" : "INR");
+
+const COLUMNS: { key: string; label: string; render: (v: number | null, cur: Currency) => string }[] = [
+  { key: "market_cap_cr", label: "Market cap", render: (v, cur) => amount(v, cur) },
   { key: "pe", label: "P/E", render: (v) => num(v) },
   { key: "roe_pct", label: "ROE", render: (v) => pct(v) },
   { key: "roce_pct", label: "ROCE", render: (v) => pct(v) },
@@ -48,6 +56,13 @@ const COLUMNS: { key: string; label: string; render: (v: number | null) => strin
 function Screener() {
   const params = useSearchParams();
   const preset = PRESETS[params.get("preset") ?? ""];
+  // ?market=US in the link wins; otherwise the market this visitor used last
+  const [market, setMarket] = useState<Market>(() => {
+    const fromUrl = params.get("market")?.toUpperCase();
+    if (fromUrl === "US" || fromUrl === "IN") return fromUrl;
+    try { return localStorage.getItem(MARKET_KEY) === "US" ? "US" : "IN"; } catch { return "IN"; }
+  });
+  const cur = currencyFor(market);
   const [fields, setFields] = useState<Record<string, string>>({});
   const [filters, setFilters] = useState<ScreenFilter[]>(preset?.filters ?? [{ field: "roe_pct", op: ">", value: 15 }]);
   const [sort, setSort] = useState({ key: "market_cap_cr", desc: true });
@@ -64,19 +79,36 @@ function Screener() {
   const { user } = useUser();
 
   useEffect(() => {
-    api<Record<string, string>>("/api/screener/fields").then(setFields).catch(() => {});
+    api<Record<string, string>>(`/api/screener/fields?market=${market}`).then(setFields).catch(() => {});
+  }, [market]);
+
+  useEffect(() => {
     api<string[]>("/api/screener/sectors").then(setAllSectors).catch(() => {});
     api<AiStatus>("/api/ai/status").then(setAi).catch(() => {});
   }, []);
 
-  const run = useCallback((f: ScreenFilter[], s: typeof sort, sec: string[] = []) => {
+  const run = useCallback((f: ScreenFilter[], s: typeof sort, sec: string[] = [], m: Market = market) => {
     setLoading(true);
     setError(null);
-    api<ScreenResult>("/api/screener", { method: "POST", body: JSON.stringify({ filters: f.filter((x) => !Number.isNaN(x.value)), sort: s.key, descending: s.desc, sectors: sec }) })
+    api<ScreenResult>("/api/screener", { method: "POST", body: JSON.stringify({ market: m, filters: f.filter((x) => !Number.isNaN(x.value)), sort: s.key, descending: s.desc, sectors: sec }) })
       .then(setResult)
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [market]);
+
+  function switchMarket(m: Market) {
+    if (m === market) return;
+    setMarket(m);
+    try { localStorage.setItem(MARKET_KEY, m); } catch { /* private window: just don't remember */ }
+    const url = new URL(window.location.href);
+    url.searchParams.set("market", m);
+    history.replaceState(null, "", url);
+    setSpec(null);
+    // promoter holding isn't reported for US companies
+    const next = m === "US" ? filters.filter((f) => f.field !== "promoter_holding_pct") : filters;
+    setFilters(next);
+    run(next, sort, sectors, m);
+  }
 
   useEffect(() => { run(filters, sort, sectors); }, [sort]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -87,7 +119,7 @@ function Screener() {
     setParsing(true);
     setNlError(null);
     try {
-      const sp = await api<ScreenSpec>("/api/screener/parse", { method: "POST", body: JSON.stringify({ query: q }) }, { auth: true });
+      const sp = await api<ScreenSpec>("/api/screener/parse", { method: "POST", body: JSON.stringify({ query: q, market }) }, { auth: true });
       setSpec(sp);
       setFilters(sp.filters);
       setSectors(sp.sectors);
@@ -111,6 +143,14 @@ function Screener() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Screener</h1>
         <p className="text-sm text-ink-2 mt-1">Filter companies by the numbers that matter. Every metric uses the same calculations as the company page.</p>
+        <div role="tablist" aria-label="Market" className="mt-4 inline-flex rounded-xl border border-line bg-surface p-1">
+          {MARKETS.map((m) => (
+            <button key={m.id} role="tab" aria-selected={market === m.id} onClick={() => switchMarket(m.id)}
+              className={`rounded-lg px-4 py-1.5 text-sm transition-colors ${market === m.id ? "bg-accent text-white font-medium shadow-sm" : "text-ink-2 hover:text-ink"}`}>
+              {m.label} <span className={`text-xs ${market === m.id ? "text-white/80" : "text-muted"}`}>{m.hint}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {ai?.tasks.screen.configured && (
@@ -204,8 +244,8 @@ function Screener() {
           action={<span className="text-xs text-muted">Universe: {result.universe}{result.built_at ? ` · updated ${new Date(result.built_at * 1000).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}` : ""}</span>}>
           {result.coverage.pending > 0 && (
             <div className="rounded-lg bg-accent-soft text-ink-2 text-xs p-2.5 mb-3">
-              FinSight is still loading the full market: {result.coverage.loaded.toLocaleString("en-IN")} of {result.coverage.listed.toLocaleString("en-IN")} NSE companies so far
-              ({result.coverage.pending.toLocaleString("en-IN")} to go). Results cover loaded companies only; this fills in automatically while the API runs.
+              FinSight is still loading the full market: {result.coverage.loaded.toLocaleString("en-IN")} of {result.coverage.listed.toLocaleString("en-IN")} {market === "US" ? "US" : "NSE"} companies so far
+              ({result.coverage.pending.toLocaleString("en-IN")} to go). Results cover loaded companies only; {market === "US" ? "the rest arrive with the next scheduled refresh" : "this fills in automatically while the API runs"}.
             </div>
           )}
           {/* Own scroll area so the header row (and the company column) stay visible while scrolling.
@@ -238,16 +278,18 @@ function Screener() {
                         </div>
                       </div>
                     </td>
-                    <td className="text-right py-2 px-3 border-b border-line/60 group-hover:bg-surface-2">{rupees(r.price as number | null, 0)}</td>
+                    <td className="text-right py-2 px-3 border-b border-line/60 group-hover:bg-surface-2">{money(r.price as number | null, cur, cur === "USD" ? 2 : 0)}</td>
                     {COLUMNS.map((c) => (
-                      <td key={c.key} className="text-right py-2 px-3 border-b border-line/60 group-hover:bg-surface-2">{c.render(r[c.key] as number | null) ?? DASH}</td>
+                      <td key={c.key} className="text-right py-2 px-3 border-b border-line/60 group-hover:bg-surface-2">{c.render(r[c.key] as number | null, cur) ?? DASH}</td>
                     ))}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          {result.count === 0 && <p className="text-sm text-muted py-4">No companies match. Try loosening a filter.</p>}
+          {result.count === 0 && <p className="text-sm text-muted py-4">{result.coverage.loaded === 0
+            ? `${market === "US" ? "US" : "NSE"} market data hasn't been loaded yet. It arrives with the next scheduled data refresh.`
+            : "No companies match. Try loosening a filter."}</p>}
           {result.count > result.shown && (
             <p className="text-xs text-muted mt-3">Showing the top {result.shown} of {result.count.toLocaleString("en-IN")} matches by the sorted column. Add filters to narrow the list.</p>
           )}

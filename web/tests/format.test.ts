@@ -32,3 +32,27 @@ describe("format", () => {
     expect(tone("Not enough data")).toBe("neutral");
   });
 });
+
+describe("US listings", () => {
+  it("detects the market from the symbol", async () => {
+    const { currencyOf } = await import("@/lib/format");
+    expect(currencyOf("AAPL.US")).toBe("USD");
+    expect(currencyOf("brk-b.us")).toBe("USD");
+    expect(currencyOf("TCS.NS")).toBe("INR");
+    expect(currencyOf(null)).toBe("INR");
+  });
+
+  it("formats dollar prices and $-million amounts", async () => {
+    const { amount, money } = await import("@/lib/format");
+    expect(money(228.586, "USD")).toBe("$228.59");
+    expect(money(1234567, "USD", 0)).toBe("$1,234,567");
+    expect(money(-3.5, "USD")).toBe("-$3.50");
+    expect(money(2082, "INR", 0)).toBe("₹2,082");
+    expect(amount(5_520_000, "USD")).toBe("$5.52 T");
+    expect(amount(416_161, "USD")).toBe("$416.2 B");
+    expect(amount(950, "USD")).toBe("$950 M");
+    expect(amount(-12_500, "USD")).toBe("-$12.5 B");
+    expect(amount(753285.78, "INR")).toBe("₹7.53 L Cr");
+    expect(amount(null, "USD")).toBe(DASH);
+  });
+});

@@ -47,6 +47,9 @@ function Note({ symbol, initial }: { symbol: string; initial: string | null }) {
   );
 }
 
+type Market = "IN" | "US";
+const TAB_KEY = "finsight.watchlist.market";
+
 export default function WatchlistPanel() {
   const { user, authEnabled } = useUser();
   const active = !!user || !authEnabled;
@@ -54,6 +57,9 @@ export default function WatchlistPanel() {
   const [list, setList] = useState<Watchlist | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [details, setDetails] = useState<Record<string, WatchDetails>>({});
+  const [tab, setTab] = useState<Market>("IN");
+  useEffect(() => { try { if (localStorage.getItem(TAB_KEY) === "US") setTab("US"); } catch { /* not remembered */ } }, []);
+  const chooseTab = (m: Market) => { setTab(m); try { localStorage.setItem(TAB_KEY, m); } catch { /* not remembered */ } };
 
   useEffect(() => {
     if (!active) return;
@@ -79,14 +85,30 @@ export default function WatchlistPanel() {
   }, [list]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!active) return null;
-  const items = list?.items ?? [];
+  const all = list?.items ?? [];
+  const counts = { IN: all.filter((i) => i.market !== "US").length, US: all.filter((i) => i.market === "US").length };
+  // an empty tab with stocks in the other market shows that market instead (the saved choice stays)
+  const shown: Market = counts[tab] === 0 && counts[tab === "US" ? "IN" : "US"] > 0 ? (tab === "US" ? "IN" : "US") : tab;
+  const items = all.filter((i) => (i.market === "US") === (shown === "US"));
 
   return (
-    <Card title={<>My watchlist {list && <span className="ml-1 text-xs font-normal text-muted">{items.length} of {list.limit}</span>}</>}
-      action={<Link href="/screener" className="text-sm text-accent hover:underline">Find stocks to watch →</Link>}>
+    <Card title={<span className="flex flex-wrap items-center gap-3">My watchlist
+        {list && all.length > 0 && (
+          <span role="tablist" aria-label="Market" className="inline-flex rounded-lg border border-line p-0.5 text-xs font-normal">
+            {(["IN", "US"] as Market[]).map((m) => (
+              <button key={m} role="tab" aria-selected={shown === m} onClick={() => chooseTab(m)}
+                className={`rounded-md px-2.5 py-1 ${shown === m ? "bg-accent text-white font-medium" : "text-ink-2 hover:text-ink"}`}>
+                {m === "IN" ? "India" : "US"} <span className={shown === m ? "text-white/80" : "text-muted"}>{counts[m]}</span>
+              </button>
+            ))}
+          </span>
+        )}
+        {list && all.length > 0 && <span className="text-xs font-normal text-muted">{items.length} of {list.limit}</span>}
+      </span>}
+      action={<Link href={`/screener?market=${shown}`} className="text-sm text-accent hover:underline">Find stocks to watch →</Link>}>
       {error && <p className="text-sm text-bad">{error}</p>}
       {!list && !error && <div className="space-y-2"><Skeleton className="h-12" /><Skeleton className="h-12" /></div>}
-      {list && items.length === 0 && (
+      {list && all.length === 0 && (
         <div className="rounded-xl border border-dashed border-line p-6 text-center">
           <p className="font-medium">Follow the stocks you care about</p>
           <p className="mt-1 text-sm text-ink-2">Tap <span className="text-[#f5b50a]">☆ Watch</span> on any company or screener result. Your stocks show up here with today&apos;s move, score changes and new filings.</p>

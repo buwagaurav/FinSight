@@ -12,7 +12,7 @@ from fastapi import HTTPException
 from app import db, research
 from app.providers import nse, sec, yahoo
 
-LIMIT = 50
+LIMIT = 50   # per market (Indian and US lists are separate)
 LABEL_CHANGE_DAYS = 7   # how long a "label changed" badge stays visible
 VISIT_GAP_MINUTES = 30  # reloads closer together than this belong to the same visit
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -42,8 +42,9 @@ _schema_ready = False
 def _ensure_schema():
     global _schema_ready
     if not _schema_ready:
-        from app import auth
+        from app import auth, us_market
         auth._ensure_schema()   # users table first
+        us_market.ensure_schema()
         db.execute(SCHEMA)
         _schema_ready = True
 
@@ -73,9 +74,13 @@ def add(user: dict, symbol: str, note: str | None = None) -> dict:
         if not row:
             raise HTTPException(404, f"{base} isn't an NSE-listed company FinSight knows about.")
         name = row["name"]
-    count = db.fetch_one("SELECT count(*) AS n FROM watchlist WHERE sub = %s", (user["sub"],))["n"]
+    # each market has its own list and its own limit
+    us = sec.is_us(base)
+    count = db.fetch_one("SELECT count(*) AS n FROM watchlist WHERE sub = %s AND (symbol LIKE %s) = %s",
+                         (user["sub"], "%" + sec.SUFFIX, us))["n"]
     if count >= LIMIT and not db.fetch_one("SELECT 1 FROM watchlist WHERE sub = %s AND symbol = %s", (user["sub"], base)):
-        raise HTTPException(409, f"Your watchlist is full ({LIMIT} stocks). Remove one to add another.")
+        market = "US" if us else "Indian"
+        raise HTTPException(409, f"Your {market} watchlist is full ({LIMIT} stocks). Remove one to add another.")
     db.execute("""INSERT INTO watchlist (sub, symbol, name, note) VALUES (%s, %s, %s, %s)
                   ON CONFLICT (sub, symbol) DO UPDATE SET note = COALESCE(EXCLUDED.note, watchlist.note)""",
                (user["sub"], base, name, (note or "").strip()[:200] or None))
@@ -100,13 +105,19 @@ def listing(user: dict) -> dict:
     _ensure_schema()
     rows = db.fetch_all("""
         SELECT w.symbol, w.note, w.added_at, w.score, w.label, w.prev_label, w.label_changed_at,
-               COALESCE(c.name, w.name) AS listed_name, m.yahoo_symbol, m.name, m.sector, m.price, m.market_cap_cr, m.pe, m.roe_pct,
-               p.data->>'change_pct' AS change_pct, p.data->>'week52_low' AS week52_low,
-               p.data->>'week52_high' AS week52_high
+               COALESCE(c.name, w.name) AS listed_name,
+               COALESCE(m.yahoo_symbol, um.yahoo_symbol) AS yahoo_symbol, COALESCE(m.name, um.name) AS name,
+               COALESCE(m.sector, um.sector) AS sector, COALESCE(m.price, um.price) AS price,
+               COALESCE(m.market_cap_cr, um.market_cap_cr) AS market_cap_cr, COALESCE(m.pe, um.pe) AS pe,
+               COALESCE(m.roe_pct, um.roe_pct) AS roe_pct,
+               COALESCE(p.data->>'change_pct', ((up.price / NULLIF(up.previous_close, 0) - 1) * 100)::text) AS change_pct,
+               p.data->>'week52_low' AS week52_low, p.data->>'week52_high' AS week52_high
         FROM watchlist w
-        LEFT JOIN companies c ON c.symbol = w.symbol   -- US listings aren't in the NSE company list
+        LEFT JOIN companies c ON c.symbol = w.symbol   -- NSE listings
         LEFT JOIN metrics m ON m.symbol = w.symbol
         LEFT JOIN profiles p ON p.symbol = w.symbol
+        LEFT JOIN us_metrics um ON um.symbol = w.symbol   -- US listings (stored by app.us_market)
+        LEFT JOIN us_prices up ON up.symbol = w.symbol
         WHERE w.sub = %s ORDER BY w.added_at""", (user["sub"],))
     # The page reloads the list whenever a star changes, so "since your last visit" must survive reloads: a new
     # visit starts only after VISIT_GAP_MINUTES without one. (SET expressions see the row's old values.)
@@ -131,6 +142,7 @@ def listing(user: dict) -> dict:
         "change_pct": num(r["change_pct"]),
         "week52_low": num(r["week52_low"]),
         "week52_high": num(r["week52_high"]),
+        "market": "US" if sec.is_us(r["symbol"]) else "IN",
         "market_cap_cr": r["market_cap_cr"],
         "pe": r["pe"],
         "roe_pct": r["roe_pct"],

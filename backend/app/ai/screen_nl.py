@@ -30,20 +30,32 @@ class ScreenSpec(BaseModel):
         description="Parts of the request that cannot be expressed with the available fields (e.g. sector, 'improving')")
 
 
-SYSTEM = f"""You convert an investor's plain-English stock screen into filters for FinSight's screener.
+def _system(market: str) -> str:
+    us = market == "US"
+    fields = screener.fields(market)
+    return f"""You convert an investor's plain-English stock screen into filters for FinSight's screener of
+{"US-listed" if us else "NSE-listed Indian"} stocks.
 
-Available fields (all percentages are in percent, e.g. 15 means 15%; market cap is in ₹ crore):
-{chr(10).join(f"- {k}: {v}" for k, v in screener.FIELDS.items())}
+Available fields (all percentages are in percent, e.g. 15 means 15%; market cap is in {"$ millions" if us else "₹ crore"}):
+{chr(10).join(f"- {k}: {v}" for k, v in fields.items())}
 
 Sectors you can filter on: {", ".join(screener.SECTORS)}.
 
 Conventions for vague terms (state each one you use in `interpretations`):
 - high/good ROE or ROCE: > 15. Excellent: > 20.   - low debt: debt_to_equity < 0.5. Debt-free: < 0.1.
 - growing / growth: CAGR > 10. Fast growth: > 15. - cheap / reasonable valuation: pe < 25 (and pe > 0).
-- large cap: market_cap_cr > 100000. Mid cap: 20000-100000.  - high dividend: dividend_yield_pct > 2.
+- large cap: market_cap_cr > {"10000 ($10B)" if us else "100000"}. Mid cap: {"2000-10000" if us else "20000-100000"}.  - high dividend: dividend_yield_pct > 2.
 Never invent fields. Anything you cannot express goes in `unsupported` instead of being approximated silently."""
 
 
-def parse(query: str) -> dict:
-    spec = llm.structured(ScreenSpec, SYSTEM, query, task="screen")
-    return spec.model_dump()
+SYSTEM = {m: _system(m) for m in screener.MARKETS}
+
+
+def parse(query: str, market: str = "IN") -> dict:
+    spec = llm.structured(ScreenSpec, SYSTEM[market], query, task="screen")
+    out = spec.model_dump()
+    allowed = screener.fields(market)
+    dropped = [f for f in out["filters"] if f["field"] not in allowed]   # e.g. promoter holding for US stocks
+    out["filters"] = [f for f in out["filters"] if f["field"] in allowed]
+    out["unsupported"] += [f"{screener.FIELDS[f['field']]} (not available for {market} stocks)" for f in dropped]
+    return out

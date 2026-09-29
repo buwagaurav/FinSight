@@ -95,12 +95,23 @@ def search(query: str, limit: int = 8) -> list[dict]:
             for t, r in (exact + prefix + named)[:limit]]
 
 
+KEEP_UPPER = {"AI", "US", "USA", "N.V.", "NV", "PLC", "LLC", "LP", "L.P.", "ETF", "REIT", "SE", "SA", "AG", "II", "III",
+              "IV", "ADR", "BDC", "LTD", "IBM", "AMD", "AT&T", "3M"}
+
+
 def _title(name: str) -> str:
-    """SEC names are often upper case ("MICROSOFT CORP"); show them the way people write them."""
+    """SEC names come with filing-state suffixes ("AMPHENOL CORP /DE/") and often in capitals ("ADOBE INC.");
+    show them the way people write them."""
+    name = re.sub(r"\s*/[A-Z]{2,3}/?\s*$", "", name.strip())
     if name != name.upper():
         return name
-    return " ".join(w if w in {"AI", "US", "USA", "N.V.", "PLC", "LLC", "LP", "ETF", "REIT"} or not w.isalpha()
-                    else w.capitalize() for w in name.split())
+
+    def word(w: str) -> str:
+        core = w.strip(".,")
+        if core in KEEP_UPPER or w in KEEP_UPPER or not any(ch.isalpha() for ch in core):
+            return w
+        return w[0] + w[1:].lower() if w[0].isalpha() else w
+    return " ".join(word(w) for w in name.split())
 
 
 # ---------------------------------------------------------------- annual statements
@@ -139,7 +150,8 @@ CONCEPTS = {
         "Operating Cash Flow": ["NetCashProvidedByUsedInOperatingActivities",
                                 "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"],
         "_capex": ["PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets"],
-        "_dividends": ["PaymentsOfDividendsCommonStock", "PaymentsOfDividends"],
+        "_dividends": ["PaymentsOfDividendsCommonStock", "PaymentsOfDividends", "PaymentsOfOrdinaryDividends",
+                       "DividendsCommonStockCash", "DividendsCommonStock"],   # declared amounts as a last resort
     },
 }
 ANNUAL_FORMS = {"10-K", "10-K/A", "10-KT"}
@@ -226,10 +238,15 @@ def annual_statements(symbol: str) -> dict:
     """Annual statements for a US company in the Yahoo provider's shape. LookupError if EDGAR has no
     US-GAAP annual reports for it (e.g. foreign companies filing 20-F under IFRS)."""
     cik = lookup(symbol)["cik"]
-    gaap = company_facts(cik).get("facts", {}).get("us-gaap", {})
+    return statements_from_facts(company_facts(cik), cik, symbol)
+
+
+def statements_from_facts(facts: dict, cik: int, symbol: str = "") -> dict:
+    """Statements from one company's XBRL facts, as served by the API or stored in the bulk companyfacts.zip."""
+    gaap = facts.get("facts", {}).get("us-gaap", {})
     ends = _fiscal_year_ends(gaap)
     if not ends:
-        raise LookupError(f"No US-GAAP annual reports on EDGAR for {symbol}")
+        raise LookupError(f"No US-GAAP annual reports on EDGAR for {symbol or cik}")
 
     series = {stmt: {name: _first(gaap, concepts) for name, concepts in items.items()}
               for stmt, items in CONCEPTS.items()}
@@ -277,12 +294,43 @@ def annual_statements(symbol: str) -> dict:
 
 def shares_outstanding(symbol: str) -> float | None:
     """Latest share count from the cover page of the company's most recent report."""
-    dei = company_facts(lookup(symbol)["cik"]).get("facts", {}).get("dei", {})
+    return shares_from_facts(company_facts(lookup(symbol)["cik"]))
+
+
+def shares_from_facts(facts: dict) -> float | None:
+    dei = facts.get("facts", {}).get("dei", {})
     rows = ((dei.get("EntityCommonStockSharesOutstanding") or {}).get("units") or {}).get("shares") or []
     if not rows:
         return None
     latest = max(r["end"] for r in rows)
     return sum(float(r["val"]) for r in rows if r["end"] == latest)   # one row per share class
+
+
+def ttm_net_income(facts: dict) -> tuple[float, str] | None:
+    """Net income for the last twelve months and the date it runs to: the latest fiscal year, rolled forward
+    with the latest 10-Q (this year's year-to-date minus the same period last year, both from that 10-Q)."""
+    gaap = facts.get("facts", {}).get("us-gaap", {})
+    concept = next((c for c in CONCEPTS["income"]["Net Income"] if c in gaap), None)
+    if not concept:
+        return None
+    annual = _annual_values(gaap, concept)
+    if not annual:
+        return None
+    fy_end = max(annual)
+    rows = (gaap[concept].get("units") or {}).get("USD") or []
+    quarterly = [r for r in rows if r.get("form") in ("10-Q", "10-Q/A") and "start" in r and r["end"] > fy_end
+                 and r["start"] > fy_end]
+    if not quarterly:
+        return annual[fy_end], fy_end
+    latest = max(quarterly, key=lambda r: (r["end"], _days(r) or 0, r["filed"]))   # longest year-to-date span
+    ytd = latest["val"]
+    prior_end = f"{int(latest['end'][:4]) - 1}{latest['end'][4:]}"
+    prior = [r for r in rows if r.get("accn") == latest.get("accn") and "start" in r
+             and abs((date.fromisoformat(r["end"]) - date.fromisoformat(prior_end)).days) <= 7
+             and abs((_days(r) or 0) - (_days(latest) or 0)) <= 7]
+    if not prior:
+        return annual[fy_end], fy_end
+    return annual[fy_end] + ytd - prior[0]["val"], latest["end"]
 
 
 # ---------------------------------------------------------------- company details and filings
@@ -300,16 +348,32 @@ def industry(symbol: str) -> dict:
             "website": s.get("website") or None}
 
 
+SIC_SECTORS = [   # (from, to, sector): broad ranges first, narrower ranges after them win
+    (100, 999, "Consumer Defensive"), (1000, 1499, "Basic Materials"), (1300, 1399, "Energy"),
+    (1500, 1799, "Industrials"), (2000, 2199, "Consumer Defensive"), (2200, 2399, "Consumer Cyclical"),
+    (2400, 2499, "Basic Materials"), (2500, 2599, "Consumer Cyclical"), (2600, 2699, "Basic Materials"),
+    (2700, 2799, "Communication Services"), (2800, 2899, "Basic Materials"), (2830, 2836, "Healthcare"),
+    (2840, 2844, "Consumer Defensive"), (2900, 2999, "Energy"), (3000, 3099, "Industrials"),
+    (3100, 3199, "Consumer Cyclical"), (3200, 3399, "Basic Materials"), (3400, 3599, "Industrials"),
+    (3570, 3579, "Technology"), (3600, 3699, "Technology"), (3630, 3639, "Consumer Cyclical"),
+    (3700, 3799, "Industrials"), (3710, 3716, "Consumer Cyclical"), (3800, 3899, "Technology"),
+    (3840, 3851, "Healthcare"), (3900, 3999, "Consumer Cyclical"), (4000, 4799, "Industrials"),
+    (4800, 4899, "Communication Services"), (4900, 4999, "Utilities"), (5000, 5199, "Industrials"),
+    (5122, 5122, "Healthcare"), (5140, 5149, "Consumer Defensive"), (5200, 5999, "Consumer Cyclical"),
+    (5400, 5499, "Consumer Defensive"), (5910, 5912, "Healthcare"), (6000, 6499, "Financial Services"),
+    (6500, 6599, "Real Estate"), (6700, 6799, "Financial Services"), (6798, 6798, "Real Estate"),
+    (7000, 7299, "Consumer Cyclical"), (7300, 7399, "Industrials"), (7370, 7379, "Technology"),
+    (7800, 7899, "Communication Services"), (7900, 7999, "Consumer Cyclical"), (8000, 8099, "Healthcare"),
+    (8200, 8299, "Consumer Defensive"), (8700, 8799, "Industrials"), (8730, 8734, "Healthcare"),
+]
+# Not operating businesses: blank-check shells (SPACs), funds, trusts
+NON_OPERATING_SIC = {6770, 6221, 6722, 6726, 6792}
+
+
 def _sector(sic: int) -> str | None:
-    """Rough SIC -> sector mapping, used only when Yahoo's sector isn't available."""
-    ranges = [(100, 999, "Basic Materials"), (1000, 1499, "Basic Materials"), (1300, 1399, "Energy"),
-              (1500, 1799, "Industrials"), (2000, 2199, "Consumer Defensive"), (2800, 2836, "Healthcare"),
-              (2900, 2999, "Energy"), (3570, 3579, "Technology"), (3600, 3699, "Technology"),
-              (3800, 3899, "Healthcare"), (4800, 4899, "Communication Services"), (4900, 4999, "Utilities"),
-              (5000, 5999, "Consumer Cyclical"), (6000, 6499, "Financial Services"), (6500, 6599, "Real Estate"),
-              (6700, 6799, "Financial Services"), (7370, 7379, "Technology"), (8000, 8099, "Healthcare")]
-    matches = [name for lo, hi, name in ranges if lo <= sic <= hi]
-    return matches[-1] if matches else None   # later, narrower ranges win
+    """SIC code -> the sector names used across FinSight (the screener's sector filter)."""
+    matches = [name for lo, hi, name in SIC_SECTORS if lo <= sic <= hi]
+    return matches[-1] if matches else None
 
 
 # Forms investors care about; the rest (insider trades, share registrations, prospectus pages...) are routine
