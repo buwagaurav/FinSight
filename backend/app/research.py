@@ -2,9 +2,16 @@
 
 Shared by the REST API and the AI assistant's tools, so both always see identical numbers.
 """
+from concurrent.futures import ThreadPoolExecutor
+
 from app import db
 from app.analytics import fundamentals, scores, technicals, valuation
 from app.providers import sec, yahoo
+
+
+# Shared by all requests: a few upstream fetches per page in flight at once, bounded so a burst of visitors
+# can't open hundreds of connections to Yahoo and SEC.
+_pool = ThreadPoolExecutor(max_workers=24, thread_name_prefix="fetch")
 
 
 def _stored(symbol: str) -> tuple[dict, dict, str] | None:
@@ -103,14 +110,16 @@ def _us_inputs(symbol: str) -> tuple[dict, dict, str | None]:
     """Profile (Yahoo quote, or SEC-only) and SEC statements for a US listing. LookupError if not listed."""
     sec.lookup(symbol)
     note = None
+    quote = _pool.submit(yahoo.profile, symbol)          # Yahoo and SEC at the same time
+    filings = _pool.submit(sec.annual_statements, symbol)
     try:
-        profile = dict(yahoo.profile(symbol))
+        profile = dict(quote.result())
     except Exception:   # price and ratios are filled in by company_report from price history or stored data
         profile = _us_profile_from_sec(symbol)
     if not profile.get("sector"):
         profile["sector"] = sec.industry(symbol)["sector"]
     try:
-        statements = sec.annual_statements(symbol)
+        statements = filings.result()
     except LookupError:
         statements = None
     except Exception:   # SEC unreachable: use the statements the nightly US refresh stored, if any
@@ -131,12 +140,17 @@ def company_report(symbol: str) -> dict:
     """Raises LookupError when the symbol is not a listed company."""
     symbol = yahoo.normalize_symbol(symbol)
     stale_note = None
+    # The quote, statements and price history come from separate requests: start them all at once rather than
+    # one after another. (The statements fetch needs the quote too; the cache makes it wait for the same call.)
+    prices = _pool.submit(yahoo.price_history, symbol)
     if sec.is_us(symbol):
         profile, statements, stale_note = _us_inputs(symbol)
     else:
+        quote = _pool.submit(yahoo.profile, symbol)
+        filed = _pool.submit(yahoo.annual_statements, symbol)
         try:
-            profile = dict(yahoo.profile(symbol))  # copy: we override some multiples below, the cached original stays intact
-            statements = yahoo.annual_statements(symbol)
+            profile = dict(quote.result())  # copy: we override some multiples below, the cached original stays intact
+            statements = filed.result()
         except Exception:
             stored = _stored(symbol)
             if not stored:
@@ -146,7 +160,7 @@ def company_report(symbol: str) -> dict:
     table = fundamentals.build_table(statements)
     growth = fundamentals.growth_summary(table)
     try:
-        history = yahoo.price_history(symbol)
+        history = prices.result()
     except Exception:
         history = []  # chart and trend show "insufficient data"; fundamentals still work
     if sec.is_us(symbol) and profile.get("price") is None:   # Yahoo's quote failed

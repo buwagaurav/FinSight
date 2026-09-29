@@ -74,3 +74,24 @@ def test_background_loader_starts_and_stops_with_the_app(clean_db, monkeypatch):
     with TestClient(main.app):
         pass
     assert len(started) == 1 and started[0].is_set()
+
+
+def test_ai_requests_beyond_the_cap_are_told_to_retry_and_not_charged(client, monkeypatch):
+    import threading
+    monkeypatch.setattr(llm, "is_configured", lambda feature: True)
+    monkeypatch.setattr(llm, "_slots", threading.BoundedSemaphore(1))
+    monkeypatch.setattr(llm, "AI_WAIT_SECONDS", 0.2)
+    release = threading.Event()
+    monkeypatch.setattr(main.assistant, "ask", lambda q, s, h: release.wait(5) and {"answer": "ok"})
+    me = {"authorization": token()}
+    first = {}
+    t = threading.Thread(target=lambda: first.update(r=client.post("/api/ask", json={"question": "Is it cheap?"}, headers=me)))
+    t.start()
+    import time
+    time.sleep(0.3)                                                    # the only slot is now taken
+    busy = client.post("/api/ask", json={"question": "Is it cheap?"}, headers=me)
+    assert busy.status_code == 503 and "busy" in busy.json()["detail"]
+    release.set()
+    t.join()
+    assert first["r"].status_code == 200
+    assert client.get("/api/me", headers=me).json()["ai_usage"]["used"] == 1   # the busy one wasn't charged

@@ -232,7 +232,8 @@ def start_job(symbol: str, company: str) -> str:
 
     def run():
         try:
-            result = generate(symbol, company, progress)
+            with llm.slot(wait=None):   # a background job waits its turn rather than failing
+                result = generate(symbol, company, progress)
             db.execute("""INSERT INTO reports (symbol, data, created_at) VALUES (%s, %s, now())
                           ON CONFLICT (symbol) DO UPDATE SET data = EXCLUDED.data, created_at = now()""",
                        (symbol, db.jsonb(result)))

@@ -15,6 +15,8 @@ e.g. a self-hosted model; set OPENAI_COMPAT_BASE_URL). The verification layer is
 import json
 import os
 import re
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TypeVar
 
@@ -40,6 +42,33 @@ PROVIDERS = {
 
 class AIUnavailable(Exception):
     """The model can't be used (missing or invalid credentials, unknown model, unsupported input)."""
+
+
+class AIBusy(AIUnavailable):
+    """Every AI slot stayed taken for the whole wait; the caller should try again shortly."""
+
+
+# At most this many AI requests (questions, summaries, screens, reports) run at once. Each holds a server thread
+# for 15-60 s, so without a cap a burst of AI use could leave no threads for charts and pages; it also bounds
+# how fast a spike can spend the AI budget.
+AI_CONCURRENCY = int(os.environ.get("FINSIGHT_AI_CONCURRENCY", "6"))
+AI_WAIT_SECONDS = 20
+_slots = threading.BoundedSemaphore(AI_CONCURRENCY)
+
+
+_DEFAULT_WAIT = object()
+
+
+@contextmanager
+def slot(wait=_DEFAULT_WAIT):
+    """Hold one of the AI_CONCURRENCY slots while the block runs. Raises AIBusy if none frees up in `wait`
+    seconds (default AI_WAIT_SECONDS; None waits as long as needed, for background jobs)."""
+    if not _slots.acquire(timeout=AI_WAIT_SECONDS if wait is _DEFAULT_WAIT else wait):
+        raise AIBusy("FinSight AI is busy with other requests right now. Please try again in a minute.")
+    try:
+        yield
+    finally:
+        _slots.release()
 
 
 class AIRefused(Exception):

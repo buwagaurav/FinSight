@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
+import anyio
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")  # before app.ai reads its settings
@@ -19,6 +20,9 @@ from app.providers import nse, sec, yahoo
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Keep the database filling up and fresh while the API runs. Disable with FINSIGHT_BACKGROUND_LOADER=0."""
+    # Endpoints are plain functions run in a thread pool. They mostly wait on Yahoo, SEC, NSE or the database,
+    # so more threads than anyio's default 40 let more visitors be served at once for little memory.
+    anyio.to_thread.current_default_thread_limiter().total_tokens = int(os.environ.get("FINSIGHT_THREADS", "100"))
     stop = threading.Event()
     if os.environ.get("FINSIGHT_BACKGROUND_LOADER", "1") != "0":
         threading.Thread(target=loader.run_forever, args=(stop,), daemon=True).start()
@@ -124,12 +128,14 @@ def company_announcements(symbol: str, limit: int = Query(30, le=100)):
 
 @app.post("/api/company/{symbol}/announcements/{announcement_id}/summary")
 def summarize_announcement(symbol: str, announcement_id: str, user: dict = Depends(auth.require_user)):
-    if not filings.cached(announcement_id):
+    try:
+        if filings.cached(announcement_id):   # stored summaries are free to reopen and need no AI slot
+            return filings.summarize(symbol, announcement_id)
         if not llm.is_configured("summary"):
             raise HTTPException(503, f"No credentials for {llm.model_spec('summary')}.")
-        auth.consume(user, "summary")  # stored summaries are free to reopen
-    try:
-        return filings.summarize(symbol, announcement_id)
+        with llm.slot():   # charged only once a slot is free
+            auth.consume(user, "summary")
+            return filings.summarize(symbol, announcement_id)
     except llm.AIUnavailable as e:
         raise HTTPException(503, str(e))
     except llm.AIRefused as e:
@@ -203,9 +209,10 @@ class NLScreenRequest(BaseModel):
 def parse_screen(req: NLScreenRequest, user: dict = Depends(auth.require_user)):
     if not llm.is_configured("screen"):
         raise HTTPException(503, f"No credentials for {llm.model_spec('screen')}.")
-    auth.consume(user, "screen")
     try:
-        return screen_nl.parse(req.query, req.market)
+        with llm.slot():
+            auth.consume(user, "screen")
+            return screen_nl.parse(req.query, req.market)
     except llm.AIUnavailable as e:
         raise HTTPException(503, str(e))
     except llm.AIRefused as e:
@@ -247,9 +254,10 @@ def me(user: dict = Depends(auth.require_user)):
 def ask(req: AskRequest, user: dict = Depends(auth.require_user)):
     if not llm.is_configured("assistant"):
         raise HTTPException(503, f"No credentials for {llm.model_spec('assistant')}.")
-    auth.consume(user, "ask")
     try:
-        return assistant.ask(req.question, req.symbol, [t.model_dump() for t in req.history])
+        with llm.slot():
+            auth.consume(user, "ask")
+            return assistant.ask(req.question, req.symbol, [t.model_dump() for t in req.history])
     except llm.AIUnavailable as e:
         raise HTTPException(503, str(e))
 
@@ -258,9 +266,10 @@ def ask(req: AskRequest, user: dict = Depends(auth.require_user)):
 def start_report(symbol: str, user: dict = Depends(auth.require_user)):
     if not llm.is_configured("report"):
         raise HTTPException(503, f"No credentials for {llm.model_spec('report')}.")
-    auth.consume(user, "report")
     try:
-        profile = yahoo.profile(yahoo.normalize_symbol(symbol))
+        # the company data has fallbacks (stored data, SEC) for when Yahoo's quote endpoint refuses the server
+        profile = research.company_report(symbol)["profile"]
+        auth.consume(user, "report")
         return {"job_id": report.start_job(profile["symbol"], profile["name"])}
     except LookupError:
         raise HTTPException(404, f"No listed company found for {symbol}")
