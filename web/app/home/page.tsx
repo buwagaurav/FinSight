@@ -41,7 +41,9 @@ export default function Home() {
     api<Ipo[]>("/api/ipos").then(setIpos).catch(() => setIpoError(true));
   }, []);
 
-  const mainboard = ipos?.filter((i) => i.segment === "Mainboard") ?? [];
+  // open IPOs, mainboard first (they're the ones most investors apply to)
+  const openNow = (ipos ?? []).filter((i) => i.status === "Open")
+    .sort((a, b) => (a.segment === b.segment ? 0 : a.segment === "Mainboard" ? -1 : 1));
 
   return (
     <div className="space-y-8">
@@ -73,18 +75,18 @@ export default function Home() {
       <WatchlistPanel />
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2" title={<>IPOs open now <InfoTip term="Subscription" /></>}
+        <Card className="lg:col-span-2" title={<>IPOs open now {ipos && <span className="ml-1 text-xs font-normal text-muted">{openNow.length}</span>} <InfoTip term="Subscription" /></>}
           action={<Link href="/ipo" className="text-sm text-accent hover:underline">All IPOs & GMP →</Link>}>
-          {ipoError && <p className="text-sm text-muted">IPO data from NSE is unavailable right now.</p>}
+          {ipoError && <p className="text-sm text-muted">IPO data is unavailable right now.</p>}
           {!ipos && !ipoError && <div className="space-y-2"><Skeleton className="h-12" /><Skeleton className="h-12" /><Skeleton className="h-12" /></div>}
-          {ipos && mainboard.length === 0 && <p className="text-sm text-muted">No mainboard IPOs are open today.</p>}
+          {ipos && openNow.length === 0 && <p className="text-sm text-muted">No IPOs are open today.</p>}
           <ul className="divide-y divide-line">
-            {mainboard.slice(0, 5).map((i) => (
+            {openNow.slice(0, 6).map((i) => (
               <li key={i.symbol} className="py-2.5 flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-sm font-medium truncate">{i.name}</div>
                   <div className="text-xs text-muted">
-                    {rupees(i.price_low, 0)}–{rupees(i.price_high, 0)} · closes {date(i.close_date)}
+                    {i.segment === "SME" ? `SME · ${i.exchange} · ` : ""}{i.price_low && i.price_low !== i.price_high ? `${rupees(i.price_low, 0)}–` : ""}{rupees(i.price_high, 0)} · closes {date(i.close_date)}
                   </div>
                 </div>
                 <div className="text-right shrink-0">

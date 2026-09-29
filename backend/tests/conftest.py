@@ -20,7 +20,7 @@ for key in ("FINSIGHT_API_JWT_SECRET", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", 
     os.environ[key] = ""
 
 TABLES = ("watchlist, ai_usage, users, metrics, profiles, statements, load_status, companies, "
-          "us_metrics, us_prices, us_statements, us_companies")
+          "us_metrics, us_prices, us_statements, us_companies, gmp_entries")
 
 
 @pytest.fixture(scope="session")

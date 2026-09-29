@@ -33,23 +33,40 @@ def add(symbol: str, gmp: float, source: str, source_url: str | None, observed_a
     return {"gmp": gmp, "source": source, "source_url": source_url, "observed_at": when.isoformat(timespec="seconds")}
 
 
+HISTORY_PAGES_PER_SYNC = 15   # detail pages fetched per sync, for IPOs with no stored readings yet
+
+
 def sync(ipos: list[dict]) -> None:
-    """Store InvestorGain's GMP readings for the current NSE IPOs. Runs at most every 30 minutes;
-    readings already stored are skipped, so the history only grows."""
+    """Record InvestorGain's current GMP for every tracked IPO (one page for all of them), and the full reading
+    history from each IPO's own page the first time it's seen. Runs at most every 30 minutes; readings already
+    stored are skipped, so the history only grows."""
     global _last_sync
     if time.time() - _last_sync < SYNC_EVERY or not _sync_lock.acquire(blocking=False):
         return
     try:
-        listed = investorgain.live_list()
-        pairs = [(i["symbol"], m) for i in ipos if (m := investorgain.match(i["name"], listed))]
+        tracked = [r for r in ipos if r.get("investorgain")]
+        readings = [(r["symbol"], r["investorgain"]["gmp"], "InvestorGain", r["investorgain"]["url"],
+                     datetime.fromisoformat(r["investorgain"]["updated"]))
+                    for r in tracked if r["investorgain"]["gmp"] is not None and r["investorgain"]["updated"]]
+        have = {row["symbol"] for row in db.fetch_all("SELECT DISTINCT symbol FROM gmp_entries WHERE symbol = ANY(%s)",
+                                                      ([r["symbol"] for r in tracked],))}
+        new = [r for r in tracked if r["symbol"] not in have][:HISTORY_PAGES_PER_SYNC]
 
-        def store(pair):
-            symbol, m = pair
-            for p in investorgain.history(m["url"]):
-                add(symbol, p["gmp"], "InvestorGain", m["url"], p["observed_at"].isoformat())
+        def past(r):
+            try:
+                return [(r["symbol"], p["gmp"], "InvestorGain", r["investorgain"]["url"], p["observed_at"])
+                        for p in investorgain.history(r["investorgain"]["url"])]
+            except Exception:
+                return []
 
         with ThreadPoolExecutor(6) as pool:
-            list(pool.map(store, pairs))
+            for rows in pool.map(past, new):
+                readings += rows
+        if readings:
+            with db.conn() as c, c.cursor() as cur:   # one round trip for the lot
+                cur.executemany("""INSERT INTO gmp_entries (symbol, gmp, source, source_url, observed_at)
+                                   VALUES (%s, %s, %s, %s, %s) ON CONFLICT (symbol, source, observed_at) DO NOTHING""",
+                                readings)
         _last_sync = time.time()
     except Exception as e:  # GMP is optional; never break the IPO page over it
         print(f"[gmp] InvestorGain sync failed: {e}")
@@ -57,8 +74,7 @@ def sync(ipos: list[dict]) -> None:
         _sync_lock.release()
 
 
-def summary(symbol: str, price_high: float | None) -> dict:
-    entries = history(symbol)
+def _summary(entries: list[dict], price_high: float | None) -> dict:
     latest = entries[-1] if entries else None
     estimate = None
     if latest and price_high:
@@ -68,3 +84,25 @@ def summary(symbol: str, price_high: float | None) -> dict:
             "label": "Estimate from unofficial GMP. Not a forecast.",
         }
     return {"official": False, "disclaimer": DISCLAIMER, "latest": latest, "estimate": estimate, "history": entries}
+
+
+def summary(symbol: str, price_high: float | None) -> dict:
+    return _summary(history(symbol), price_high)
+
+
+def summaries(ipos: list[dict]) -> dict[str, dict]:
+    """GMP summary for every IPO in one query. An IPO's readings may be stored under its NSE symbol too (from
+    before IPOs had a stable key), so both are read."""
+    keys = {r["symbol"]: [r["symbol"]] + ([r["nse_symbol"]] if r.get("nse_symbol") else []) for r in ipos}
+    rows = db.fetch_all("""SELECT symbol, gmp, source, source_url, observed_at FROM gmp_entries
+                           WHERE symbol = ANY(%s) ORDER BY observed_at""",
+                        ([k for ks in keys.values() for k in ks],))
+    by_symbol: dict[str, list[dict]] = {}
+    for r in rows:
+        by_symbol.setdefault(r["symbol"], []).append(
+            {"gmp": r["gmp"], "source": r["source"], "source_url": r["source_url"], "observed_at": r["observed_at"].isoformat()})
+    out = {}
+    for ipo in ipos:
+        entries = sorted((e for k in keys[ipo["symbol"]] for e in by_symbol.get(k, [])), key=lambda e: e["observed_at"])
+        out[ipo["symbol"]] = _summary(entries, ipo["price_high"])
+    return out

@@ -122,13 +122,21 @@ export type NewsItem = { title: string; summary: string; published: string | nul
 
 export type GmpEntry = { gmp: number; source: string; source_url: string | null; observed_at: string };
 
+export type IpoStatus = "Open" | "Upcoming" | "Closed" | "Allotted" | "Listed";
 export type Ipo = {
-  symbol: string;
+  symbol: string;                 // stable key: InvestorGain id ("IG-2370"), or the NSE symbol for NSE-only issues
+  nse_symbol: string | null;
   name: string;
   segment: "Mainboard" | "SME";
-  status: string;
+  exchange: string | null;        // "NSE, BSE", "NSE" or "BSE"
+  status: IpoStatus | string;
   open_date: string | null;
   close_date: string | null;
+  allotment_date: string | null;
+  listing_date: string | null;
+  lot: number | null;
+  listing_gain_pct: number | null;
+  investorgain: { url: string; gmp: number | null; updated: string | null } | null;
   price_low: number | null;
   price_high: number | null;
   shares_offered: number | null;

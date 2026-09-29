@@ -7,6 +7,24 @@ import { api, GmpEntry, Ipo } from "@/lib/api";
 import { crore, date, pct, rupees } from "@/lib/format";
 
 const SEGMENTS = ["Mainboard", "SME", "All"] as const;
+const STAGES = [
+  { id: "live", label: "Open & upcoming", statuses: ["Open", "Upcoming"] },
+  { id: "done", label: "Closed & allotted", statuses: ["Closed", "Allotted"] },
+  { id: "listed", label: "Recently listed", statuses: ["Listed"] },
+  { id: "all", label: "All", statuses: null },
+] as const;
+
+function stageBadge(i: Ipo): { text: string; variant: "accent" | "neutral" | "good" | "bad" } {
+  if (i.status === "Open") return { text: daysLeft(i.close_date) ?? "Open", variant: "accent" };
+  if (i.status === "Upcoming") return { text: `Opens ${date(i.open_date)}`, variant: "accent" };
+  if (i.status === "Closed") return { text: i.allotment_date ? `Closed · allotment ${date(i.allotment_date)}` : "Closed", variant: "neutral" };
+  if (i.status === "Allotted") return { text: i.listing_date ? `Allotted · lists ${date(i.listing_date)}` : "Allotted", variant: "neutral" };
+  if (i.status === "Listed") {
+    const g = i.listing_gain_pct;
+    return { text: `Listed ${date(i.listing_date)}${g != null ? ` · ${pct(g, 1, true)}` : ""}`, variant: g == null ? "neutral" : g >= 0 ? "good" : "bad" };
+  }
+  return { text: i.status, variant: "neutral" };
+}
 
 function daysLeft(close: string | null) {
   if (!close) return null;
@@ -107,7 +125,8 @@ function GmpPanel({ ipo, onAdded }: { ipo: Ipo; onAdded: (e: GmpEntry) => void }
 export default function IpoPage() {
   const [ipos, setIpos] = useState<Ipo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [segment, setSegment] = useState<(typeof SEGMENTS)[number]>("Mainboard");
+  const [segment, setSegment] = useState<(typeof SEGMENTS)[number]>("All");
+  const [stage, setStage] = useState<(typeof STAGES)[number]["id"]>("live");
   const [open, setOpen] = useState<string | null>(null);
 
   useEffect(() => { api<Ipo[]>("/api/ipos").then(setIpos).catch((e: Error) => setError(e.message)); }, []);
@@ -125,14 +144,19 @@ export default function IpoPage() {
     }) ?? null);
   }
 
-  const rows = ipos?.filter((i) => segment === "All" || i.segment === segment) ?? [];
+  const inSegment = ipos?.filter((i) => segment === "All" || i.segment === segment) ?? [];
+  const inStage = (id: string, i: Ipo) => {
+    const s = STAGES.find((x) => x.id === id)!.statuses;
+    return s === null || (s as readonly string[]).includes(i.status);
+  };
+  const rows = inSegment.filter((i) => inStage(stage, i));
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">IPOs & GMP</h1>
-          <p className="text-sm text-ink-2 mt-1">Official issue details and live subscription from NSE. GMP comes from InvestorGain, is unofficial and unverified, and is kept separate from official data.</p>
+          <p className="text-sm text-ink-2 mt-1">Every mainboard and SME IPO on NSE and BSE, from upcoming to recently listed. Live subscription comes from NSE where NSE lists the issue. GMP comes from InvestorGain, is unofficial and unverified, and is kept separate from official data.</p>
         </div>
         <div role="tablist" className="flex gap-1 bg-surface-2 rounded-lg p-0.5">
           {SEGMENTS.map((s) => (
@@ -142,14 +166,28 @@ export default function IpoPage() {
         </div>
       </div>
 
+      <div role="tablist" aria-label="Stage" className="flex flex-wrap gap-2">
+        {STAGES.map((s) => {
+          const n = inSegment.filter((i) => inStage(s.id, i)).length;
+          return (
+            <button key={s.id} role="tab" aria-selected={stage === s.id} onClick={() => setStage(s.id)}
+              className={`text-sm px-3 py-1.5 rounded-full border ${stage === s.id ? "border-accent bg-accent-soft text-accent font-medium" : "border-line text-ink-2 hover:border-ink-2"}`}>
+              {s.label} {ipos && <span className={stage === s.id ? "" : "text-muted"}>{n}</span>}
+            </button>
+          );
+        })}
+      </div>
+
       {error && <ErrorBox message={error} />}
       {!ipos && !error && <div className="space-y-2">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-20" />)}</div>}
-      {ipos && rows.length === 0 && <Card><p className="text-sm text-muted">No {segment === "All" ? "" : segment + " "}IPOs are open or upcoming right now.</p></Card>}
+      {ipos && rows.length === 0 && <Card><p className="text-sm text-muted">No {segment === "All" ? "" : segment + " "}IPOs {stage === "live" ? "are open or upcoming right now" : "in this list right now"}.</p></Card>}
 
       <div className="space-y-3">
         {rows.map((i) => {
           const isOpen = open === i.symbol;
           const sub = i.subscription_times;
+          const badge = stageBadge(i);
+          const minInvest = i.lot && i.price_high ? i.lot * i.price_high : null;
           return (
             <Card key={i.symbol}>
               <div>
@@ -157,19 +195,24 @@ export default function IpoPage() {
                   <div className="min-w-0">
                     <div className="font-medium">{i.name}</div>
                     <div className="text-xs text-muted mt-0.5 flex flex-wrap gap-x-2">
-                      <span>{i.symbol}</span><span>·</span><span>{i.segment}</span><span>·</span>
+                      {i.nse_symbol && <><span>{i.nse_symbol}</span><span>·</span></>}
+                      <span>{i.segment}{i.exchange ? ` · ${i.exchange}` : ""}</span><span>·</span>
                       <span>{date(i.open_date)} – {date(i.close_date)}</span>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Badge variant={daysLeft(i.close_date) === "Closed" ? "neutral" : "accent"}>{daysLeft(i.close_date) ?? i.status}</Badge>
+                    <Badge variant={badge.variant}>{badge.text}</Badge>
                     {i.gmp.latest && <Badge variant="warn">GMP {rupees(i.gmp.latest.gmp, 0)}{i.gmp.estimate ? ` (${pct(i.gmp.estimate.estimated_premium_pct, 0, true)})` : ""} · unofficial</Badge>}
                   </div>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-3">
-                  <div><div className="text-xs text-muted">Price band</div><div className="text-sm font-semibold tabular">{i.price_high ? `${rupees(i.price_low, 0)} – ${rupees(i.price_high, 0)}` : "—"}</div></div>
+                  <div><div className="text-xs text-muted">Price{i.price_low !== i.price_high ? " band" : ""}</div><div className="text-sm font-semibold tabular">{i.price_high ? (i.price_low && i.price_low !== i.price_high ? `${rupees(i.price_low, 0)} – ${rupees(i.price_high, 0)}` : rupees(i.price_high, 0)) : "—"}</div></div>
                   <div><div className="text-xs text-muted">Issue size (at upper band)</div><div className="text-sm font-semibold tabular">{crore(i.issue_size_cr)}</div></div>
-                  <div><div className="text-xs text-muted">Shares offered</div><div className="text-sm font-semibold tabular">{i.shares_offered ? new Intl.NumberFormat("en-IN").format(i.shares_offered) : "—"}</div></div>
+                  <div>
+                    <div className="text-xs text-muted">Lot · min. investment</div>
+                    <div className="text-sm font-semibold tabular">{i.lot ? `${new Intl.NumberFormat("en-IN").format(i.lot)} shares` : "—"}</div>
+                    {minInvest != null && <div className="text-xs text-muted tabular">{rupees(minInvest, 0)}</div>}
+                  </div>
                   <div>
                     <div className="text-xs text-muted flex items-center">Subscribed<InfoTip term="Subscription" /></div>
                     <div className="text-sm font-semibold tabular">{sub != null ? `${sub.toFixed(2)}x` : "—"}</div>

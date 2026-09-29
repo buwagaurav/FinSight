@@ -13,7 +13,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from app import auth, candles, gmp, loader, research, screener, watchlist
+from app import auth, candles, gmp, ipos, loader, research, screener, watchlist
 from app.ai import assistant, filings, llm, report, screen_nl
 from app.providers import nse, sec, yahoo
 
@@ -145,22 +145,24 @@ def summarize_announcement(symbol: str, announcement_id: str, user: dict = Depen
 
 
 @app.get("/api/ipos")
-def ipos():
+def ipos_list():
     try:
-        rows = nse.current_ipos()
+        rows = ipos.current()
     except Exception as e:
-        raise HTTPException(502, f"NSE IPO data unavailable: {e}")
+        raise HTTPException(502, f"IPO data unavailable: {e}")
     gmp.sync(rows)
+    gmps = gmp.summaries(rows)
     for r in rows:
-        r["gmp"] = gmp.summary(r["symbol"], r["price_high"])
+        r["gmp"] = gmps[r["symbol"]]
     return rows
 
 
 @app.get("/api/ipos/{symbol}")
 def ipo(symbol: str):
-    match = next((r for r in ipos() if r["symbol"] == symbol.upper()), None)
+    key = symbol.upper()
+    match = next((r for r in ipos_list() if key in (r["symbol"], r["nse_symbol"])), None)
     if not match:
-        raise HTTPException(404, f"{symbol} is not in the current NSE IPO list")
+        raise HTTPException(404, f"{symbol} is not among the IPOs FinSight tracks")
     return match
 
 
