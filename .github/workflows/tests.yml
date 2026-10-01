@@ -31,6 +31,8 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
         working-directory: web
+      - run: npx next typegen   # route types (LayoutProps, PageProps) live in .next/, which isn't committed
+        working-directory: web
       - run: npx tsc --noEmit
         working-directory: web
       - run: npm test
