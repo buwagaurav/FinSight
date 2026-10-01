@@ -12,6 +12,7 @@ Flow per question:
   5. Deterministic warnings (stale data, mixed periods, unofficial sources, failed lookups) go with the answer.
 """
 import json
+import os
 from datetime import datetime, timedelta, timezone
 
 from app.ai import guardrail
@@ -21,6 +22,17 @@ from app.ai import tools as T
 
 DISCLAIMER = "This is research assistance, not investment advice."
 STALE_GMP = timedelta(days=3)
+# Look-ups stop and the model must answer once less than 5 s of this budget remain; writing the answer takes another
+# 3-5 s, so 8 s keeps most answers under 10 s (measured with deepseek-flash: 2.7 s for a concept, 5-11 s with data
+# at a 10 s budget).
+BUDGET_SECONDS = float(os.environ.get("FINSIGHT_ASSISTANT_SECONDS", "8"))
+TOOL_ROUNDS = 2   # data look-ups before the model must answer; most questions need one
+
+CONCEPT = """Explain the finance term or concept the user asked about, for a retail investor, in 60-150 words of
+Markdown: a one-sentence definition, the formula if there is one, how to read it (what high or low means and why it
+depends on the industry or context), and one common pitfall. Any example must be a hypothetical one with round
+numbers, labelled "for example". Don't state any real company's or market's figures; if the user is on a company
+page, end by saying the company's own figure is on its FinSight page. No buy/sell advice."""
 
 
 SCOPE = guardrail.skill_text()
@@ -73,6 +85,8 @@ def ask(question: str, symbol: str | None = None, history: list[dict] | None = N
     preloaded: list[str] = []
     content = question
     kind = I.classify(question, symbol)
+    if I.is_concept(question, symbol):
+        return _concept(question, messages, sources)
     if symbol:
         content = f"The user is viewing {symbol}; assume the question is about it unless it says otherwise.\n"
         if kind in PREFETCH_FOR:
@@ -83,7 +97,7 @@ def ask(question: str, symbol: str | None = None, history: list[dict] | None = N
     system = f"{SCOPE}\n\n{SYSTEM}\nThis is a {kind.replace('_', ' ')} question. {I.GUIDANCE[kind]}"
     try:
         run = llm.run_agent(system, messages, I.tools_for(kind, symbol), sources, question, task="assistant",
-                            preloaded=preloaded)
+                            preloaded=preloaded, max_rounds=TOOL_ROUNDS, budget=BUDGET_SECONDS)
     except llm.AIRefused:
         run = {"answer": "I can't help with that request. Try asking about a company's financials, valuation or news.",
                "calls": [], "unverified": [], "misattributed": [], "model": llm.model_spec("assistant"), "usage": {}}
@@ -98,6 +112,22 @@ def ask(question: str, symbol: str | None = None, history: list[dict] | None = N
     return {**result, "intent": kind, "warnings": warnings(run.get("outputs", preloaded), result["sources"], run["calls"]),
             "data_timestamp": max((s["retrieved_at"] for s in sources.items), default=None),
             "disclaimer": DISCLAIMER, "usage": run["usage"]}
+
+
+def _concept(question: str, messages: list[dict], sources: T.Sources) -> dict:
+    """"What is ROE?": one quick model call with no tools or company data, so nothing to fetch or check."""
+    messages.append({"role": "user", "content": question})
+    try:
+        run = llm.run_agent(f"{SCOPE}\n\n{CONCEPT}", messages, [], sources, question, task="assistant",
+                            max_rounds=0, budget=BUDGET_SECONDS, verify=False)
+    except llm.AIRefused:
+        return out_of_scope()
+    if guardrail.is_refusal(run["answer"]):
+        return {**out_of_scope(), "model": run["model"], "usage": run["usage"]}
+    return {"answer": run["answer"], "sources": [], "tool_calls": [], "intent": "general_finance", "warnings": [],
+            "verification": {"passed": True, "applicable": False, "unverified": [], "misattributed": [],
+                             "note": "A general explanation: no company data was used, so there are no figures to check."},
+            "data_timestamp": None, "disclaimer": DISCLAIMER, "model": run["model"], "usage": run["usage"]}
 
 
 def out_of_scope() -> dict:

@@ -60,7 +60,9 @@ function Answer({ result }: { result: AskResult }) {
     <div className="space-y-3">
       <CitedMarkdown text={result.answer} sources={result.sources} />
 
-      {v.passed ? (
+      {v.applicable === false ? (
+        <p className="text-xs text-muted">{v.note}</p>
+      ) : v.passed ? (
         <Badge variant="good">✓ Every figure, quote and calculation checked against its source</Badge>
       ) : (
         <div className="rounded-lg border border-warn/40 bg-warn-soft p-2.5 text-xs text-ink-2">
@@ -207,7 +209,7 @@ export default function AskPanel({ symbol, name, suggestions = COMPANY_SUGGESTIO
             {!t.result && !t.error && (
               <div className="flex items-center gap-2 text-sm text-muted">
                 <span className="inline-block w-2 h-2 rounded-full bg-accent animate-pulse" />
-                Researching: reading statements, checking every number… (usually 15–60 seconds)
+                Researching and checking every number… (usually under 10 seconds)
               </div>
             )}
           </div>

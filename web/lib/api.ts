@@ -207,7 +207,8 @@ export type AskResult = {
   answer: string;
   sources: AskSource[];
   tool_calls: { tool: string; input: Record<string, unknown>; error: boolean }[];
-  verification: { passed: boolean; unverified: string[]; misattributed?: string[]; unsupported_quotes?: string[]; arithmetic?: string[]; note: string };
+  // applicable: false for a general explanation that used no company data (nothing to check)
+  verification: { passed: boolean; applicable?: boolean; unverified: string[]; misattributed?: string[]; unsupported_quotes?: string[]; arithmetic?: string[]; note: string };
   model: string;
   intent?: AskIntent;
   warnings?: string[];          // stale or mixed-period data, unofficial sources, failed lookups

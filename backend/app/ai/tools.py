@@ -6,6 +6,7 @@ import math
 import re
 import statistics
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from app import gmp, ipos, research, screener
@@ -276,16 +277,23 @@ def _announcements(args, sources: Sources):
     return {"announcements": items[:8], "note": "Routine procedural filings are omitted."}
 
 
+INDEX_WAIT_SECONDS = 3
+_indexer = ThreadPoolExecutor(max_workers=4, thread_name_prefix="index")
+
+
 def _search_documents(args, sources: Sources):
     from app import docs  # local import: keeps the tool list importable without the database
     symbol = yahoo.normalize_symbol(args["symbol"])
     if sec.is_us(symbol):
         return {"result": "Document search covers NSE-listed companies only. Use get_announcements for this "
                           "company's SEC filings."}
+    # A company's recent filings are indexed on first use (~8 s of PDF downloads; instant afterwards). Wait a few
+    # seconds at most so answers stay fast: indexing carries on in the background for the next question.
+    indexing = _indexer.submit(docs.index_filings, symbol)
     try:
-        docs.index_filings(symbol)  # small PDFs; indexed on first use, cheap afterwards
-    except Exception:
-        pass  # search whatever is already stored
+        indexing.result(timeout=INDEX_WAIT_SECONDS)
+    except Exception:   # still indexing (timeout) or indexing failed: search whatever is already stored
+        pass
     kind = None if args.get("kind") in (None, "any") else args["kind"]
     rows = docs.search(symbol, args["query"], kind, limit=5)
     have = docs.coverage(symbol)

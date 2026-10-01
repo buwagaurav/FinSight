@@ -16,6 +16,8 @@ import json
 import os
 import re
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TypeVar
@@ -69,6 +71,13 @@ def slot(wait=_DEFAULT_WAIT):
         yield
     finally:
         _slots.release()
+
+
+class AITimeout(AIUnavailable):
+    """The model didn't answer within the time budget."""
+
+
+TIMEOUT_MESSAGE = "FinSight AI took too long to answer. Please try again, or ask a narrower question."
 
 
 class AIRefused(Exception):
@@ -141,11 +150,19 @@ class AnthropicAdapter:
         except anthropic.NotFoundError as e:
             raise AIUnavailable(f"Anthropic model '{self.model}' was not found.") from e
 
-    def chat(self, system: str, messages: list[dict], tools: list[dict]) -> Turn:
+    def chat(self, system: str, messages: list[dict], tools: list[dict], final: bool = False,
+             timeout: float | None = None) -> Turn:
+        """`final` forbids further tool calls (the model must answer now); `timeout` caps this call, without retries."""
         extra = {"tools": tools} if tools else {}
-        r = self._guard(lambda: self.client.beta.messages.create(
-            model=self.model, max_tokens=16000, system=system, messages=messages, cache_control={"type": "ephemeral"},
-            betas=[FALLBACK_BETA], fallbacks="default", **extra))
+        if tools and final:
+            extra["tool_choice"] = {"type": "none"}
+        client = self.client.with_options(timeout=timeout, max_retries=0) if timeout else self.client
+        try:
+            r = self._guard(lambda: client.beta.messages.create(
+                model=self.model, max_tokens=16000, system=system, messages=messages, cache_control={"type": "ephemeral"},
+                betas=[FALLBACK_BETA], fallbacks="default", **extra))
+        except anthropic.APITimeoutError as e:
+            raise AITimeout(TIMEOUT_MESSAGE) from e
         stop = {"tool_use": "tool_use", "refusal": "refusal", "max_tokens": "max_tokens"}.get(r.stop_reason, "end")
         return Turn(
             text="".join(b.text for b in r.content if b.type == "text").strip(),
@@ -192,10 +209,17 @@ class OpenAICompatAdapter:
     def _tool(t: dict) -> dict:
         return {"type": "function", "function": {"name": t["name"], "description": t["description"], "parameters": t["input_schema"]}}
 
-    def chat(self, system: str, messages: list[dict], tools: list[dict]) -> Turn:
+    def chat(self, system: str, messages: list[dict], tools: list[dict], final: bool = False,
+             timeout: float | None = None) -> Turn:
         extra = {"tools": [self._tool(t) for t in tools]} if tools else {}
-        r = self._guard(lambda: self.client.chat.completions.create(
-            model=self.model, max_tokens=3000, messages=[{"role": "system", "content": system}, *messages], **extra))
+        if tools and final:
+            extra["tool_choice"] = "none"
+        client = self.client.with_options(timeout=timeout, max_retries=0) if timeout else self.client
+        try:
+            r = self._guard(lambda: client.chat.completions.create(
+                model=self.model, max_tokens=3000, messages=[{"role": "system", "content": system}, *messages], **extra))
+        except openai.APITimeoutError as e:
+            raise AITimeout(TIMEOUT_MESSAGE) from e
         choice = r.choices[0]
         msg = choice.message
         calls = []
@@ -252,6 +276,12 @@ def adapter(task: str):
 
 # ---------------------------------------------------------------- task entry points
 
+# With a time budget (Ask FinSight), the model must answer once less than FINAL_RESERVE seconds remain; a repair
+# round only runs with REPAIR_MIN seconds left; and no single call may take longer than its share, or CALL_FLOOR.
+FINAL_RESERVE = 5.0
+REPAIR_MIN = 6.0
+CALL_FLOOR = 8.0
+
 def structured(output: type[M], system: str, content, task: str) -> M:
     """One call whose reply is validated against a Pydantic model."""
     return adapter(task).structured(output, system, content)
@@ -267,13 +297,22 @@ def complete(system: str, prompt: str, task: str) -> Turn:
 
 def run_agent(system: str, messages: list[dict], tool_names: list[str] | None, sources: T.Sources,
               question: str = "", max_rounds: int = 5, task: str = "assistant",
-              preloaded: list[str] | None = None) -> dict:
+              preloaded: list[str] | None = None, budget: float | None = None, verify: bool = True) -> dict:
     """Tool-use loop whose final answer must pass the grounding and citation checks.
 
     `messages` are plain {"role", "content": str} turns. Returns {answer, outputs, calls, unverified,
     misattributed, model, usage}; `outputs` are the raw tool results, kept so a later step (e.g. the report
-    writer) can be verified against everything the agents saw."""
+    writer) can be verified against everything the agents saw.
+
+    `budget` (seconds) keeps interactive answers fast: tool rounds stop, and the model must answer, when time runs
+    low, and the repair round is skipped when there's no time for it (problems are then reported, not hidden).
+    `verify=False` is for answers that use no data (explaining a concept), where there's nothing to check."""
     ai = adapter(task)
+    deadline = time.monotonic() + budget if budget else None
+
+    def left() -> float:
+        return deadline - time.monotonic() if deadline else float("inf")
+
     tools = [t for t in T.TOOLS if tool_names is None or t["name"] in tool_names]
     history = list(messages)
     outputs: list[str] = list(preloaded or [])   # data sent with the question counts as a source for checks
@@ -283,8 +322,11 @@ def run_agent(system: str, messages: list[dict], tool_names: list[str] | None, s
     model = model_spec(task)
     drafted: list[str] = []   # substantive text the model wrote alongside tool calls in this attempt
 
+    tool_rounds = 0
     for _ in range(max_rounds + 2):
-        turn = ai.chat(system, history, tools)
+        final = bool(tools) and (tool_rounds >= max_rounds or left() < FINAL_RESERVE)
+        turn = ai.chat(system, history, tools, final=final,
+                       timeout=max(left(), CALL_FLOOR) if deadline else None)
         model = turn.model
         for k in usage:
             usage[k] += turn.usage.get(k, 0)
@@ -292,30 +334,40 @@ def run_agent(system: str, messages: list[dict], tool_names: list[str] | None, s
             raise AIRefused("The model declined this request.")
         history.append(turn.native)
 
-        if turn.stop == "tool_use":
+        if turn.stop == "tool_use" and not final:
             if len(turn.text) > 150:  # some models start the answer before their last tool call; keep it
                 drafted.append(turn.text)
-            results = []
-            for call in turn.tool_calls:
+
+            def run(call: ToolCall) -> tuple[str, bool]:
                 if call.error:
-                    output, is_error = json.dumps({"error": call.error}), True
-                else:
-                    output, is_error = T.run_tool(call.name, call.input, sources)
+                    return json.dumps({"error": call.error}), True
+                return T.run_tool(call.name, call.input, sources)
+
+            with ThreadPoolExecutor(max(1, len(turn.tool_calls))) as pool:   # one round's tools run at once
+                ran = list(pool.map(run, turn.tool_calls))
+            results = []
+            for call, (output, is_error) in zip(turn.tool_calls, ran):
                 outputs.append(output)
                 calls.append({"tool": call.name, "input": call.input, "error": is_error})
                 results.append((call.id, output, is_error))
             history.extend(ai.tool_results(results))
+            tool_rounds += 1
             continue
 
+        if final and turn.tool_calls:
+            repaired = True   # the provider ignored "answer now": its unanswered tool calls rule out a repair turn
         answer = "\n\n".join([*drafted, turn.text]) if drafted else turn.text
         drafted = []
         if turn.stop == "max_tokens":
             answer += "\n\n_(Cut off at the length limit.)_"
+        if not verify:
+            return {"answer": answer, "outputs": outputs, "calls": calls, "unverified": [], "misattributed": [],
+                    "unsupported_quotes": [], "arithmetic": [], "model": model, "usage": usage}
         missing = unverified_numbers(answer, outputs, question)
         wrong = misattributed(answer, outputs)
         quotes = unsupported_quotes(answer, outputs)
         maths = arithmetic_errors(answer)
-        if (missing or wrong or quotes or maths) and not repaired:
+        if (missing or wrong or quotes or maths) and not repaired and left() > REPAIR_MIN:
             repaired = True
             problems = []
             if missing:

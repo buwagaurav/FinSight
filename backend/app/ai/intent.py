@@ -8,14 +8,36 @@ import re
 INTENTS = ("company_research", "stock_screening", "company_comparison", "valuation", "filing_question",
            "ipo_research", "technical_analysis", "portfolio_risk", "general_finance")
 
+# Finance terms a "What is ...?" question can ask about (regex fragments)
+TERMS = [
+    r"p/?e", r"peg", r"p/?b", r"p/?s", r"ev/?ebitda", r"roe", r"roce", r"roa", r"ebitda", r"ebit", r"eps", r"ttm",
+    r"cagr", r"xirr", r"irr", r"dcf", r"nav", r"aum", r"free cash flow", r"cash flow", r"operating cash flow",
+    r"dividend(?: yield)?", r"ex[- ]dividend(?: date)?", r"record date", r"face value", r"book value",
+    r"intrinsic value", r"enterprise value", r"market cap(?:italisation|italization)?", r"(?:small|mid|large)[- ]cap",
+    r"blue[- ]chip", r"penny stock", r"free float", r"promoter(?: holding| pledge)?", r"pledg(?:e|ing)",
+    r"(?:operating|net|gross|profit|ebitda) margin", r"current ratio", r"quick ratio", r"interest coverage",
+    r"debt[- ]to[- ]equity", r"leverage", r"working capital", r"depreciation", r"amorti[sz]ation", r"goodwill",
+    r"revenue", r"net profit", r"balance sheet", r"income statement", r"p&l", r"profit and loss", r"beta", r"alpha",
+    r"sharpe ratio", r"volatility", r"drawdown", r"liquidity", r"stock split", r"bonus issue", r"buy ?back",
+    r"rights issue", r"ipo", r"fpo", r"ofs", r"offer for sale", r"anchor investor", r"lot size", r"price band",
+    r"gmp", r"grey market premium", r"listing gain", r"sip", r"swp", r"stp", r"etf", r"reit", r"invit",
+    r"mutual fund", r"index fund", r"elss", r"expense ratio", r"sgb", r"sovereign gold bond", r"ppf", r"nps",
+    r"ltcg", r"stcg", r"capital gains? tax", r"demat(?: account)?", r"f&o", r"futures?", r"options?",
+    r"call option", r"put option", r"short selling", r"margin trading", r"circuit(?: breaker| limit)?",
+    r"upper circuit", r"lower circuit", r"sensex", r"nifty(?: 50)?", r"index", r"bull market", r"bear market",
+    r"inflation", r"repo rate", r"bond yield", r"yield", r"bond", r"coupon", r"credit rating", r"stop[- ]loss",
+    r"moving average", r"rsi", r"macd", r"support and resistance", r"diversification", r"asset allocation",
+    r"compounding", r"rupee cost averaging", r"portfolio", r"hedging", r"arbitrage", r"sebi", r"qip", r"fii", r"dii",
+]
+CONCEPT = (r"^\s*(?:what|how|why) (?:is|are|does|do) (?:a |an |the )?(?:" + "|".join(TERMS) + r")s?"
+           r"(?: ratio| rate)?(?: work| mean| calculated| used)?\s*\??\s*$"
+           r"|^\s*what does [\w/&. -]{1,30} mean\s*\??\s*$|^\s*define\b|^\s*explain (?:what|how) (?:a |an |the )?(?:"
+           + "|".join(TERMS) + r")s?\b")
+
 # First match wins, so the most specific intents come first.
 RULES = [
     # Concept questions with nothing else in them: "What is a P/E ratio?", "How does an IPO work?"
-    ("general_finance", r"^\s*(?:what|how|why) (?:is|are|does|do) (?:a |an |the )?(?:p/?e|roe|roce|ebitda|cagr|"
-                        r"free cash flow|dividend yield|market cap(?:italisation|italization)?|beta|gmp|ipo|sip|"
-                        r"mutual fund|index fund|book value|eps|debt[- ]to[- ]equity|working capital|"
-                        r"grey market premium|stop[- ]loss|demat account)s?(?: ratio)?(?: work| mean| calculated)?"
-                        r"\s*\??\s*$|^\s*what does [\w/ -]{1,30} mean\s*\??\s*$|^\s*define\b"),
+    ("general_finance", CONCEPT),
     ("ipo_research", r"\bipos?\b|\bgmp\b|grey market|subscri(?:bed|ption)|allotment|listing gain|\bdrhp\b|\brhp\b|"
                      r"price band|anchor investor"),
     ("portfolio_risk", r"\bportfolio\b|my (?:holdings|stocks|investments)|\bholdings\b|diversif|concentrat|"
@@ -79,12 +101,16 @@ def classify(question: str, symbol: str | None = None) -> str:
     """The question's intent. With a company in view, an unmatched question is company research."""
     for name, pattern in _COMPILED:
         if pattern.search(question):
-            # "What is ROE?" while viewing a company is about that company's ROE; "What is an ROE?" is not
-            if name == "general_finance" and symbol and not re.search(r"^\s*define\b|\b(?:is|are|does|do) an? ",
-                                                                      question, re.IGNORECASE):
+            # "What is ROE?" is a concept question on any page; "What is the ROE?" on a stock page means its ROE
+            if name == "general_finance" and symbol and re.search(r"\b(?:is|are|does|do) the ", question, re.IGNORECASE):
                 return "company_research"
             return name
     return "company_research" if symbol else "general_finance"
+
+
+def is_concept(question: str, symbol: str | None = None) -> bool:
+    """A question about what a finance term means, which needs no company data: answered in one quick model call."""
+    return classify(question, symbol) == "general_finance" and bool(_COMPILED[0][1].search(question))
 
 
 def tools_for(intent: str, symbol: str | None = None) -> list[str]:

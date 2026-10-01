@@ -14,7 +14,8 @@ from app.analytics import fundamentals, portfolio, technicals
 @pytest.mark.parametrize("question,symbol,expected", [
     ("What is a P/E ratio?", None, "general_finance"),
     ("How does an IPO work?", "TCS.NS", "general_finance"),
-    ("What is ROE?", "TCS.NS", "company_research"),            # that company's ROE
+    ("What is ROE?", "TCS.NS", "general_finance"),             # a concept, on any page
+    ("What is the ROE?", "TCS.NS", "company_research"),        # that company's ROE
     ("Tell me about Reliance", "RELIANCE.NS", "company_research"),
     ("Find stocks with ROE above 20% and low debt", None, "stock_screening"),
     ("Compare TCS vs Infosys", None, "company_comparison"),
@@ -187,3 +188,53 @@ def test_off_topic_questions_are_refused_free(clean_db, monkeypatch):
     body = client.post("/api/ask", json={"question": "Tell me a joke about cats"}, headers=me).json()
     assert body["intent"] == "out_of_scope" and body["answer"] == guardrail.REFUSAL
     assert client.get("/api/me", headers=me).json()["ai_usage"]["used"] == 0
+
+
+class FakeModel:
+    """Stands in for a provider: asks for two tools at once on its first turn, then answers."""
+
+    def __init__(self, answer="Revenue was ₹100 Cr [S1].", delay=0.0):
+        self.answer, self.delay, self.calls = answer, delay, []
+
+    def chat(self, system, messages, tools, final=False, timeout=None):
+        import time
+        time.sleep(self.delay)
+        self.calls.append({"final": final, "tools": len(tools), "timeout": timeout})
+        if tools and not final and len(self.calls) == 1:
+            return llm.Turn("", [llm.ToolCall("a", "slow", {}), llm.ToolCall("b", "slow", {})], "tool_use", "fake", {})
+        return llm.Turn(self.answer, [], "end", "fake", {})
+
+    def tool_results(self, results):
+        return [{"role": "tool", "content": c} for _, c, _ in results]
+
+
+def test_tools_in_one_round_run_in_parallel(monkeypatch):
+    import time
+    model = FakeModel()
+    monkeypatch.setattr(llm, "adapter", lambda task: model)
+    monkeypatch.setattr(T, "TOOLS", [{"name": "slow"}])
+    monkeypatch.setattr(T, "run_tool", lambda name, args, sources: (time.sleep(0.5), ('{"revenue": 100}', False))[1])
+    start = time.monotonic()
+    run = llm.run_agent("sys", [{"role": "user", "content": "q"}], None, T.Sources(), budget=10)
+    assert time.monotonic() - start < 0.9          # two 0.5 s tools, run together
+    assert len(run["calls"]) == 2 and run["unverified"] == []
+    assert all(c["timeout"] for c in model.calls)   # every call is capped when there's a budget
+
+
+def test_out_of_time_forces_an_answer_and_skips_the_repair_round(monkeypatch):
+    model = FakeModel(answer="Revenue was ₹999 Cr.", delay=0.3)   # a figure no tool returned
+    monkeypatch.setattr(llm, "adapter", lambda task: model)
+    monkeypatch.setattr(T, "TOOLS", [{"name": "slow"}])
+    # 3 s is under both FINAL_RESERVE (answer now) and REPAIR_MIN (no time to fix figures)
+    run = llm.run_agent("sys", [{"role": "user", "content": "q"}], None, T.Sources(), budget=3)
+    assert model.calls[0]["final"] is True and len(model.calls) == 1   # no tool round, no repair round
+    assert run["unverified"] == ["₹999 Cr"]                            # reported to the user instead
+
+
+def test_concept_questions_take_one_quick_call(monkeypatch):
+    model = FakeModel(answer="ROE (return on equity) is net profit ÷ shareholders' equity. For example, 15%...")
+    monkeypatch.setattr(llm, "adapter", lambda task: model)
+    monkeypatch.setattr(T, "run_tool", lambda *a: pytest.fail("concept questions fetch no data"))
+    result = assistant.ask("What is ROE?", "TCS.NS")
+    assert len(model.calls) == 1 and model.calls[0]["tools"] == 0
+    assert result["intent"] == "general_finance" and result["verification"]["applicable"] is False
