@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app import auth, candles, gmp, ipos, loader, research, screener, watchlist
-from app.ai import assistant, filings, llm, report, screen_nl
+from app.ai import assistant, filings, guardrail, llm, report, screen_nl
 from app.providers import nse, sec, yahoo
 
 @asynccontextmanager
@@ -254,6 +254,8 @@ def me(user: dict = Depends(auth.require_user)):
 
 @app.post("/api/ask")
 def ask(req: AskRequest, user: dict = Depends(auth.require_user)):
+    if guardrail.precheck(req.question, req.symbol):
+        return assistant.out_of_scope()   # no model call, nothing charged
     if not llm.is_configured("assistant"):
         raise HTTPException(503, f"No credentials for {llm.model_spec('assistant')}.")
     try:

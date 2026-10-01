@@ -202,7 +202,7 @@ export type AskSource = {
   source_type?: SourceType; period?: string | null; retrieved_at?: string;
 };
 export type AskIntent = "company_research" | "stock_screening" | "company_comparison" | "valuation" | "filing_question"
-  | "ipo_research" | "technical_analysis" | "portfolio_risk" | "general_finance";
+  | "ipo_research" | "technical_analysis" | "portfolio_risk" | "general_finance" | "out_of_scope";
 export type AskResult = {
   answer: string;
   sources: AskSource[];

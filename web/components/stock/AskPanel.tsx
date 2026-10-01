@@ -43,6 +43,7 @@ const INTENT_LABELS: Record<AskIntent, string> = {
   technical_analysis: "technical analysis",
   portfolio_risk: "portfolio risk",
   general_finance: "general finance",
+  out_of_scope: "outside finance",
 };
 
 function retrieved(iso: string) {
@@ -52,6 +53,9 @@ function retrieved(iso: string) {
 function Answer({ result }: { result: AskResult }) {
   const v = result.verification;
   const tools = result.tool_calls.filter((c) => !c.error);
+  if (result.intent === "out_of_scope") {
+    return <div className="rounded-lg bg-surface-2 text-sm text-ink-2 p-3">{result.answer}</div>;
+  }
   return (
     <div className="space-y-3">
       <CitedMarkdown text={result.answer} sources={result.sources} />
@@ -104,9 +108,10 @@ function Answer({ result }: { result: AskResult }) {
   );
 }
 
-/** `symbol` is the company in view; leave it out for questions that aren't about one company (e.g. on the IPO page). */
-export default function AskPanel({ symbol, name, suggestions = COMPANY_SUGGESTIONS }:
-  { symbol?: string; name: string; suggestions?: string[] }) {
+/** `symbol` is the company in view; leave it out for questions that aren't about one company. `persistent` keeps
+ * the conversation when the company changes (the site-wide chat follows the user between pages). */
+export default function AskPanel({ symbol, name, suggestions = COMPANY_SUGGESTIONS, persistent = false }:
+  { symbol?: string; name: string; suggestions?: string[]; persistent?: boolean }) {
   const { user } = useUser();
   const [status, setStatus] = useState<AiStatus | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -115,7 +120,7 @@ export default function AskPanel({ symbol, name, suggestions = COMPANY_SUGGESTIO
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { api<AiStatus>("/api/ai/status").then(setStatus).catch(() => setStatus(null)); }, []);
-  useEffect(() => { setTurns([]); }, [symbol]);
+  useEffect(() => { if (!persistent) setTurns([]); }, [symbol, persistent]);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [turns]);
 
   async function ask(question: string) {

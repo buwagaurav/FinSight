@@ -1,6 +1,8 @@
 """FinSight research assistant: Claude plans and explains, the analytics engine calculates.
 
 Flow per question:
+  0. guardrail: plainly off-topic questions are refused before any model call, and the model follows the scope
+     rules in skills/finance-guardrail/SKILL.md for the rest.
   1. intent.classify() picks the question type (company research, screening, IPO, portfolio risk...), which decides
      the tools the model gets and the extra rules it follows.
   2. Claude calls tools (company data, statements, valuation, news, filings, IPOs, technicals, screener, calculator).
@@ -12,6 +14,7 @@ Flow per question:
 import json
 from datetime import datetime, timedelta, timezone
 
+from app.ai import guardrail
 from app.ai import intent as I
 from app.ai import llm
 from app.ai import tools as T
@@ -20,6 +23,7 @@ DISCLAIMER = "This is research assistance, not investment advice."
 STALE_GMP = timedelta(days=3)
 
 
+SCOPE = guardrail.skill_text()
 SYSTEM = """You are FinSight's research assistant for Indian retail investors (NSE/BSE stocks, IPOs and US-listed stocks).
 Rules:
 - Every figure must come from data in this conversation or a tool result; never from memory. Use the calculate
@@ -76,13 +80,15 @@ def ask(question: str, symbol: str | None = None, history: list[dict] | None = N
             content += f"Data already loaded:\n{data}\n"
         content += f"\nQuestion: {question}"
     messages.append({"role": "user", "content": content})
-    system = f"{SYSTEM}\nThis is a {kind.replace('_', ' ')} question. {I.GUIDANCE[kind]}"
+    system = f"{SCOPE}\n\n{SYSTEM}\nThis is a {kind.replace('_', ' ')} question. {I.GUIDANCE[kind]}"
     try:
         run = llm.run_agent(system, messages, I.tools_for(kind, symbol), sources, question, task="assistant",
                             preloaded=preloaded)
     except llm.AIRefused:
         run = {"answer": "I can't help with that request. Try asking about a company's financials, valuation or news.",
                "calls": [], "unverified": [], "misattributed": [], "model": llm.model_spec("assistant"), "usage": {}}
+    if guardrail.is_refusal(run["answer"]):
+        return {**out_of_scope(), "model": run["model"], "usage": run["usage"]}
     result = _result(run["answer"], sources, run["calls"], run["unverified"], run["model"], run["misattributed"])
     v = result["verification"]
     v["unsupported_quotes"], v["arithmetic"] = run.get("unsupported_quotes", []), run.get("arithmetic", [])
@@ -92,6 +98,13 @@ def ask(question: str, symbol: str | None = None, history: list[dict] | None = N
     return {**result, "intent": kind, "warnings": warnings(run.get("outputs", preloaded), result["sources"], run["calls"]),
             "data_timestamp": max((s["retrieved_at"] for s in sources.items), default=None),
             "disclaimer": DISCLAIMER, "usage": run["usage"]}
+
+
+def out_of_scope() -> dict:
+    """The standard reply to a question outside finance, in the same shape as an answer."""
+    return {"answer": guardrail.REFUSAL, "sources": [], "tool_calls": [], "intent": "out_of_scope", "warnings": [],
+            "verification": {"passed": True, "unverified": [], "misattributed": [], "note": ""},
+            "data_timestamp": None, "disclaimer": DISCLAIMER, "model": "guardrail", "usage": {}}
 
 
 def _walk(node, key: str):
