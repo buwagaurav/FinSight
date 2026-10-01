@@ -10,12 +10,14 @@ Flow per question:
   4. verify.unverified_numbers() checks every figure against the tool outputs. If any figure cannot be
      traced, Claude gets one chance to fix it; whatever remains is reported to the user, never hidden.
   5. Deterministic warnings (stale data, mixed periods, unofficial sources, failed lookups) go with the answer.
+  6. conversation.update() returns the topic and cited data, which the browser sends back with the next question
+     so follow-ups ("what about FY24?") resolve and their carried-over figures still pass the checks.
 """
 import json
 import os
 from datetime import datetime, timedelta, timezone
 
-from app.ai import guardrail
+from app.ai import conversation, guardrail
 from app.ai import intent as I
 from app.ai import llm
 from app.ai import tools as T
@@ -61,12 +63,13 @@ PREFETCH = [("get_company_snapshot", {}), ("get_financials", {})]
 PREFETCH_FOR = {"company_research", "company_comparison", "valuation", "filing_question", "technical_analysis"}
 
 
-def _context_for(symbol: str, sources: T.Sources) -> tuple[str, list[str]]:
-    """The company's key data, sent with the question so most answers need no extra tool round."""
+def _context_for(symbol: str, sources: T.Sources, have: list[str] = ()) -> tuple[str, list[str]]:
+    """The company's key data, sent with the question so most answers need no extra tool round. Data already
+    carried over from an earlier turn (`have`) isn't sent twice."""
     blocks, outputs = [], []
     for name, args in PREFETCH:
         out, err = T.run_tool(name, {**args, "symbol": symbol}, sources)
-        if not err:
+        if not err and out not in have:
             blocks.append(f"{name}: {out}")
             outputs.append(out)
     return "\n".join(blocks), outputs
@@ -79,60 +82,75 @@ def _history(history: list[dict] | None) -> list[dict]:
              else m["content"][:600] + " …"} for m in turns]
 
 
-def ask(question: str, symbol: str | None = None, history: list[dict] | None = None) -> dict:
-    sources = T.Sources()
+def ask(question: str, symbol: str | None = None, history: list[dict] | None = None,
+        state: dict | None = None) -> dict:
+    """`state` is the conversation state returned with the previous answer (see conversation.py)."""
+    state = conversation.load(state)
+    sources = T.Sources(seed=state["sources"])
     messages = _history(history)
-    preloaded: list[str] = []
-    content = question
-    kind = I.classify(question, symbol)
+    # The company in view, or else the one company the conversation is about ("what about FY24?" on the home page)
+    focus = symbol or (state["companies"][0]["symbol"] if len(state["companies"]) == 1 else None)
+    kind = I.classify(question, focus)
     if I.is_concept(question, symbol):
-        return _concept(question, messages, sources)
+        return _concept(question, messages, sources, state)
+    preloaded: list[str] = list(state["evidence"])   # earlier turns' cited data counts as loaded data for the checks
+    lines = [conversation.context_note(state, symbol)] if state["companies"] or state["metric"] else []
     if symbol:
-        content = f"The user is viewing {symbol}; assume the question is about it unless it says otherwise.\n"
-        if kind in PREFETCH_FOR:
-            data, preloaded = _context_for(symbol, sources)
-            content += f"Data already loaded:\n{data}\n"
-        content += f"\nQuestion: {question}"
+        lines.append(f"The user is viewing {symbol}; assume the question is about it unless it, or the conversation "
+                     "above, says otherwise.")
+    if focus and kind in PREFETCH_FOR:
+        data, loaded = _context_for(focus, sources, preloaded)
+        preloaded += loaded
+        if data:
+            lines.append(f"Data already loaded:\n{data}")
+    content = "\n".join(lines + [f"\nQuestion: {question}"]) if lines else question
     messages.append({"role": "user", "content": content})
     system = f"{SCOPE}\n\n{SYSTEM}\nThis is a {kind.replace('_', ' ')} question. {I.GUIDANCE[kind]}"
     try:
-        run = llm.run_agent(system, messages, I.tools_for(kind, symbol), sources, question, task="assistant",
+        run = llm.run_agent(system, messages, I.tools_for(kind, focus), sources, question, task="assistant",
                             preloaded=preloaded, max_rounds=TOOL_ROUNDS, budget=BUDGET_SECONDS)
     except llm.AIRefused:
         run = {"answer": "I can't help with that request. Try asking about a company's financials, valuation or news.",
                "calls": [], "unverified": [], "misattributed": [], "model": llm.model_spec("assistant"), "usage": {}}
     if guardrail.is_refusal(run["answer"]):
-        return {**out_of_scope(), "model": run["model"], "usage": run["usage"]}
+        return {**out_of_scope(state), "model": run["model"], "usage": run["usage"]}
     result = _result(run["answer"], sources, run["calls"], run["unverified"], run["model"], run["misattributed"])
     v = result["verification"]
     v["unsupported_quotes"], v["arithmetic"] = run.get("unsupported_quotes", []), run.get("arithmetic", [])
     if v["unsupported_quotes"] or v["arithmetic"]:
         v["passed"] = False
         v["note"] = "Some quotes or calculations could not be confirmed against their sources. Treat them with caution."
+    new_state = conversation.update(state, question, run["answer"], symbol, run.get("outputs", preloaded),
+                                    sources.items, run["calls"])
     return {**result, "intent": kind, "warnings": warnings(run.get("outputs", preloaded), result["sources"], run["calls"]),
-            "data_timestamp": max((s["retrieved_at"] for s in sources.items), default=None),
-            "disclaimer": DISCLAIMER, "usage": run["usage"]}
+            "data_timestamp": max((s["retrieved_at"] for s in result["sources"]), default=None),
+            "disclaimer": DISCLAIMER, "usage": run["usage"], "state": new_state,
+            "follow_ups": conversation.follow_ups(kind, new_state)}
 
 
-def _concept(question: str, messages: list[dict], sources: T.Sources) -> dict:
+def _concept(question: str, messages: list[dict], sources: T.Sources, state: dict) -> dict:
     """"What is ROE?": one quick model call with no tools or company data, so nothing to fetch or check."""
     messages.append({"role": "user", "content": question})
     try:
         run = llm.run_agent(f"{SCOPE}\n\n{CONCEPT}", messages, [], sources, question, task="assistant",
                             max_rounds=0, budget=BUDGET_SECONDS, verify=False)
     except llm.AIRefused:
-        return out_of_scope()
+        return out_of_scope(state)
     if guardrail.is_refusal(run["answer"]):
-        return {**out_of_scope(), "model": run["model"], "usage": run["usage"]}
+        return {**out_of_scope(state), "model": run["model"], "usage": run["usage"]}
+    state = {**state, "metric": conversation.metric_label(question) or state["metric"]}   # "what is it for TCS?"
     return {"answer": run["answer"], "sources": [], "tool_calls": [], "intent": "general_finance", "warnings": [],
+            "state": state, "follow_ups": conversation.follow_ups("general_finance", state),
             "verification": {"passed": True, "applicable": False, "unverified": [], "misattributed": [],
                              "note": "A general explanation: no company data was used, so there are no figures to check."},
             "data_timestamp": None, "disclaimer": DISCLAIMER, "model": run["model"], "usage": run["usage"]}
 
 
-def out_of_scope() -> dict:
-    """The standard reply to a question outside finance, in the same shape as an answer."""
+def out_of_scope(state: dict | None = None) -> dict:
+    """The standard reply to a question outside finance, in the same shape as an answer. The conversation state
+    passes through unchanged, so an off-topic question doesn't make the assistant forget the topic."""
     return {"answer": guardrail.REFUSAL, "sources": [], "tool_calls": [], "intent": "out_of_scope", "warnings": [],
+            "state": state, "follow_ups": [],
             "verification": {"passed": True, "unverified": [], "misattributed": [], "note": ""},
             "data_timestamp": None, "disclaimer": DISCLAIMER, "model": "guardrail", "usage": {}}
 

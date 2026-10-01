@@ -1,3 +1,4 @@
+import json
 import os
 import threading
 from contextlib import asynccontextmanager
@@ -11,7 +12,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")  # before app.ai re
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app import auth, candles, gmp, ipos, loader, research, screener, watchlist
 from app.ai import assistant, filings, guardrail, llm, report, screen_nl
@@ -238,6 +239,14 @@ class AskRequest(BaseModel):
     question: str = Field(min_length=3, max_length=2000)
     symbol: str | None = None
     history: list[ChatTurn] = []
+    state: dict | None = None   # returned with the previous answer; see app/ai/conversation.py
+
+    @field_validator("state")
+    @classmethod
+    def _small_state(cls, v):
+        if v is not None and len(json.dumps(v)) > 60000:
+            raise ValueError("conversation state is too large; start a new conversation")
+        return v
 
 
 @app.get("/api/ai/status")
@@ -255,13 +264,13 @@ def me(user: dict = Depends(auth.require_user)):
 @app.post("/api/ask")
 def ask(req: AskRequest, user: dict = Depends(auth.require_user)):
     if guardrail.precheck(req.question, req.symbol):
-        return assistant.out_of_scope()   # no model call, nothing charged
+        return assistant.out_of_scope(req.state)   # no model call, nothing charged
     if not llm.is_configured("assistant"):
         raise HTTPException(503, f"No credentials for {llm.model_spec('assistant')}.")
     try:
         with llm.slot():
             auth.consume(user, "ask")
-            return assistant.ask(req.question, req.symbol, [t.model_dump() for t in req.history])
+            return assistant.ask(req.question, req.symbol, [t.model_dump() for t in req.history], req.state)
     except llm.AIUnavailable as e:
         raise HTTPException(503, str(e))
 

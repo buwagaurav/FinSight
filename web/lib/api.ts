@@ -214,6 +214,16 @@ export type AskResult = {
   warnings?: string[];          // stale or mixed-period data, unofficial sources, failed lookups
   data_timestamp?: string | null;
   disclaimer?: string;
+  state?: ConversationState | null;   // send back with the next question so follow-ups resolve
+  follow_ups?: string[];
+};
+/** What the conversation is about, plus the (server-signed) data the last answer cited. Opaque to the UI except
+ * for the topic fields it shows. */
+export type ConversationState = {
+  companies: { symbol: string; name: string }[];
+  metric: string | null;
+  period: string | null;
+  [key: string]: unknown;
 };
 export type AiTask = "assistant" | "report" | "summary" | "screen";
 export type AiStatus = { configured: boolean; model: string; sign_in_required?: boolean; tasks: Record<AiTask, { model: string; configured: boolean }> };

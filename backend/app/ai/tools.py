@@ -163,8 +163,10 @@ def source_type(name: str) -> str:
 class Sources:
     """Registry of everything the assistant has looked at, so every claim can point to where it came from."""
 
-    def __init__(self):
-        self.items: list[dict] = []
+    def __init__(self, seed: list[dict] | None = None):
+        """`seed`: sources carried over from earlier in a conversation, keeping their ids so old citations hold."""
+        self.items: list[dict] = [dict(s) for s in seed or []]
+        self._next = max((int(s["id"][1:]) for s in self.items), default=0) + 1   # ids may have gaps
         self._lock = threading.Lock()  # agents in the multi-agent report share one registry
 
     def add(self, name: str, url: str | None, detail: str, period: str | None = None) -> str:
@@ -173,7 +175,8 @@ class Sources:
             for s in self.items:
                 if (s["name"], s["url"], s["detail"]) == (name, url, detail):
                     return s["id"]
-            sid = f"S{len(self.items) + 1}"
+            sid = f"S{self._next}"
+            self._next += 1
             self.items.append({"id": sid, "name": name, "url": url, "detail": detail, "source_type": source_type(name),
                                "period": period, "retrieved_at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
             return sid

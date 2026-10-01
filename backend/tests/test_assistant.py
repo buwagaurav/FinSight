@@ -238,3 +238,71 @@ def test_concept_questions_take_one_quick_call(monkeypatch):
     result = assistant.ask("What is ROE?", "TCS.NS")
     assert len(model.calls) == 1 and model.calls[0]["tools"] == 0
     assert result["intent"] == "general_finance" and result["verification"]["applicable"] is False
+
+
+class ScriptedModel:
+    """Plays back a fixed list of turns and records what the model was sent."""
+
+    def __init__(self, turns):
+        self.turns, self.seen = list(turns), []
+
+    def chat(self, system, messages, tools, final=False, timeout=None):
+        self.seen.append(messages[-1]["content"] if isinstance(messages[-1]["content"], str) else "")
+        return self.turns.pop(0)
+
+    def tool_results(self, results):
+        return [{"role": "tool", "content": c} for _, c, _ in results]
+
+
+def _fake_financials(name, args, sources):
+    if name != "get_financials":
+        return '{"error": "not in this test"}', True
+    sid = sources.add("Company filings via Yahoo Finance", "https://y/TCS", "Tata Consultancy Services Limited (TCS.NS): annual statements")
+    return json.dumps({"source": sid, "unit": "₹ Cr", "years": [{"year": "FY24", "revenue": 240893.0},
+                                                                  {"year": "FY25", "revenue": 255324.0}]}), False
+
+
+def test_follow_ups_resolve_against_the_conversation_and_stay_verified(monkeypatch):
+    model = ScriptedModel([
+        llm.Turn("", [llm.ToolCall("1", "get_financials", {"symbol": "TCS"})], "tool_use", "fake", {}),
+        llm.Turn("TCS revenue was ₹2,55,324 Cr in FY25 [S1].", [], "end", "fake", {}),
+        llm.Turn("In FY24 it was ₹2,40,893 Cr [S1].", [], "end", "fake", {}),   # no tool call: carried data
+        llm.Turn("", [llm.ToolCall("2", "calculate", {"operation": "percent_change", "values": [240893, 255324],
+                                                       "label": "TCS revenue growth FY24 to FY25"})], "tool_use", "fake", {}),
+        llm.Turn("Revenue grew 5.99% [S2] from ₹2,40,893 Cr [S1] to ₹2,55,324 Cr [S1].", [], "end", "fake", {}),
+    ])
+    monkeypatch.setattr(llm, "adapter", lambda task: model)
+    real_run_tool = T.run_tool
+    monkeypatch.setattr(T, "run_tool", lambda n, a, s: real_run_tool(n, a, s) if n == "calculate" else _fake_financials(n, a, s))
+
+    first = assistant.ask("What was TCS revenue in FY2025?")
+    state = first["state"]
+    assert state["companies"] == [{"symbol": "TCS.NS", "name": "Tata Consultancy Services Limited"}]
+    assert (state["metric"], state["period"]) == ("revenue", "FY25") and len(state["evidence"]) == 1
+
+    second = assistant.ask("What about FY2024?", state=state)       # home page: no symbol in view
+    assert "company: Tata Consultancy Services Limited (TCS.NS); metric: revenue; period: FY25" in model.seen[2]
+    assert second["verification"]["passed"] and second["sources"][0]["id"] == "S1"   # carried figure, still checked
+    assert second["state"]["period"] == "FY24" and second["state"]["metric"] == "revenue"
+
+    third = assistant.ask("What was the percentage change?", state=second["state"])
+    assert third["verification"]["passed"], third["verification"]
+    assert third["state"]["last_calculation"]["label"] == "TCS revenue growth FY24 to FY25"
+    assert any("TCS" in q or "Tata" in q for q in third["follow_ups"])
+
+
+def test_tampered_conversation_data_is_dropped():
+    from app.ai import conversation
+    sources = [{"id": "S1", "name": "x", "url": None, "detail": "Infosys Limited (INFY.NS): metrics"}]
+    good = conversation.update(conversation.empty(), "Infosys ROE?", "ROE 30% [S1]", None,
+                               ['{"source":"S1","roe_pct":30}'], sources, [])
+    assert conversation.load(good)["evidence"] == ['{"source":"S1","roe_pct":30}']
+    forged = {**good, "evidence": ['{"source":"S1","roe_pct":99}']}
+    assert conversation.load(forged)["evidence"] == [] and conversation.load(forged)["companies"]   # topic kept
+
+
+def test_period_and_metric_labels():
+    from app.ai import conversation
+    assert conversation.period_label("revenue in FY2025 vs FY 24") == "FY24"
+    assert conversation.period_label("Q2 FY26 results") == "Q2 FY26"
+    assert conversation.metric_label("What was the operating margin and revenue?") == "operating margin"

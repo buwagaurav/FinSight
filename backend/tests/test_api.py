@@ -61,7 +61,7 @@ def test_ai_is_not_charged_when_no_model_is_configured(client, monkeypatch):
 def test_ai_allowance_is_enforced(client, monkeypatch):
     monkeypatch.setenv("FINSIGHT_AI_DAILY_LIMIT", "2")
     monkeypatch.setattr(llm, "is_configured", lambda feature: True)
-    monkeypatch.setattr(main.assistant, "ask", lambda q, s, h: {"answer": "stub"})
+    monkeypatch.setattr(main.assistant, "ask", lambda q, s, h, state=None: {"answer": "stub"})
     me = {"authorization": token()}
     codes = [client.post("/api/ask", json={"question": "Is TCS cheap?"}, headers=me).status_code for _ in range(3)]
     assert codes == [200, 200, 429]
@@ -82,7 +82,7 @@ def test_ai_requests_beyond_the_cap_are_told_to_retry_and_not_charged(client, mo
     monkeypatch.setattr(llm, "_slots", threading.BoundedSemaphore(1))
     monkeypatch.setattr(llm, "AI_WAIT_SECONDS", 0.2)
     release = threading.Event()
-    monkeypatch.setattr(main.assistant, "ask", lambda q, s, h: release.wait(5) and {"answer": "ok"})
+    monkeypatch.setattr(main.assistant, "ask", lambda q, s, h, state=None: release.wait(5) and {"answer": "ok"})
     me = {"authorization": token()}
     first = {}
     t = threading.Thread(target=lambda: first.update(r=client.post("/api/ask", json={"question": "Is it cheap?"}, headers=me)))
