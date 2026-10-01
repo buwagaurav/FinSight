@@ -3,11 +3,14 @@ model invent data. Every result is tagged with source ids ("S1", "S2", ...) the 
 """
 import json
 import math
+import re
+import statistics
 import threading
+from datetime import datetime, timezone
 
-from app import research, screener
-from app.analytics import fundamentals
-from app.providers import nse, sec, yahoo
+from app import gmp, ipos, research, screener
+from app.analytics import fundamentals, portfolio, technicals
+from app.providers import investorgain, nse, sec, yahoo
 
 SYMBOL = {"type": "string", "description": "NSE symbol such as TCS or RELIANCE.NS, or a US listing ending in .US such as "
                                            "AAPL.US (use search_company if unsure)."}
@@ -101,6 +104,34 @@ TOOLS = [
         },
     },
     {
+        "name": "get_ipo_data",
+        "description": "IPOs tracked from NSE (official issue data) and InvestorGain: status, dates, price band, lot, issue "
+                       "size, subscription, listing gain, and the unofficial grey-market premium (GMP) with when it was "
+                       "observed. Omit query to list open and upcoming IPOs.",
+        "input_schema": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "IPO company name or symbol, e.g. 'Tata Capital'"}}},
+    },
+    {
+        "name": "get_technicals",
+        "description": "Price trend: 50/200-day moving averages, returns over 1m/3m/6m/1y, 1-year volatility, maximum "
+                       "drawdown, 52-week range and beta against the Nifty 50 (S&P 500 for US stocks).",
+        "input_schema": {"type": "object", "properties": {"symbol": SYMBOL}, "required": ["symbol"]},
+    },
+    {
+        "name": "portfolio_risk",
+        "description": "Risk of a portfolio of 1-15 listed stocks: concentration, sector weights, 1-year volatility, "
+                       "maximum drawdown, beta, correlation and diversification. Weights may be percentages or amounts.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"holdings": {"type": "array", "minItems": 1, "maxItems": 15, "items": {
+                "type": "object",
+                "properties": {"symbol": SYMBOL, "weight": {"type": "number", "description": "% or amount invested"}},
+                "required": ["symbol", "weight"],
+            }}},
+            "required": ["holdings"],
+        },
+    },
+    {
         "name": "calculate",
         "description": "Calculator for all arithmetic. cagr [first,last,years] -> %/yr; percent_change [from,to] -> %; "
                        "ratio [a,b]; difference [a,b]; sum; average.",
@@ -117,6 +148,17 @@ TOOLS = [
 ]
 
 
+OFFICIAL = re.compile(r"^(NSE|SEC|BSE)\b")
+
+
+def source_type(name: str) -> str:
+    """official: the exchange or regulator's own record; unofficial: grey-market data; secondary: everything else
+    (data vendors, news, and FinSight's own calculations over them)."""
+    if "GMP" in name:
+        return "unofficial"
+    return "official" if OFFICIAL.match(name) else "secondary"
+
+
 class Sources:
     """Registry of everything the assistant has looked at, so every claim can point to where it came from."""
 
@@ -124,13 +166,15 @@ class Sources:
         self.items: list[dict] = []
         self._lock = threading.Lock()  # agents in the multi-agent report share one registry
 
-    def add(self, name: str, url: str | None, detail: str) -> str:
+    def add(self, name: str, url: str | None, detail: str, period: str | None = None) -> str:
+        """`period` is what the data describes ("FY2021-FY2025", "as of 2026-09-30 15:30"), when known."""
         with self._lock:
             for s in self.items:
                 if (s["name"], s["url"], s["detail"]) == (name, url, detail):
                     return s["id"]
             sid = f"S{len(self.items) + 1}"
-            self.items.append({"id": sid, "name": name, "url": url, "detail": detail})
+            self.items.append({"id": sid, "name": name, "url": url, "detail": detail, "source_type": source_type(name),
+                               "period": period, "retrieved_at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
             return sid
 
 
@@ -150,12 +194,18 @@ def _company_name(report: dict) -> str:
     return f"{report['profile']['name']} ({report['profile']['symbol']})"
 
 
+def _years(report: dict) -> str | None:
+    years = report["financials"]["years"]
+    return f"{years[0]['year']}-{years[-1]['year']}" if years else None
+
+
 def _snapshot(args, sources: Sources):
     r = research.company_report(args["symbol"])
     p = r["profile"]
     name = _company_name(r)
     src_quote = sources.add("Yahoo Finance quote", p["source"]["url"], f"{name}: price and ratios")
-    src_fin = sources.add(r["financials"]["source"]["name"], r["financials"]["source"]["url"], f"{name}: annual statements")
+    src_fin = sources.add(r["financials"]["source"]["name"], r["financials"]["source"]["url"], f"{name}: annual statements",
+                          _years(r))
     src_engine = sources.add("FinSight scoring engine", None, f"{name}: rule-based scores ({r['scores']['method']})")
     keep = ["symbol", "name", "sector", "industry", "price", "change_pct", "market_cap_cr", "week52_high", "week52_low",
             "pe", "pb", "roe_ttm_pct", "debt_to_equity_ttm", "dividend_yield_pct", "promoter_holding_pct",
@@ -183,7 +233,8 @@ CORE_METRICS = ["revenue", "operating_profit", "net_profit", "eps", "operating_m
 
 def _financials(args, sources: Sources):
     r = research.company_report(args["symbol"])
-    src = sources.add(r["financials"]["source"]["name"], r["financials"]["source"]["url"], f"{_company_name(r)}: annual statements")
+    src = sources.add(r["financials"]["source"]["name"], r["financials"]["source"]["url"], f"{_company_name(r)}: annual statements",
+                      _years(r))
     years = r["financials"]["years"]
     wanted = args.get("metrics") or CORE_METRICS
     if wanted:
@@ -220,7 +271,7 @@ def _announcements(args, sources: Sources):
         if a["routine"]:
             continue
         sid = sources.add("SEC filing" if us else "NSE filing", a["pdf_url"],
-                          f"{a['company']}: {a['category']} ({(a['published'] or '')[:10]})")
+                          f"{a['company']}: {a['category']} ({(a['published'] or '')[:10]})", (a["published"] or "")[:10] or None)
         items.append({"source": sid, "date": (a["published"] or "")[:10], "category": a["category"], "text": a["text"][:220]})
     return {"announcements": items[:8], "note": "Routine procedural filings are omitted."}
 
@@ -241,9 +292,11 @@ def _search_documents(args, sources: Sources):
     passages = []
     for r in rows:
         label = "annual report" if r["kind"] == "annual_report" else "filing"
+        period = r.get("fiscal_year") or (str(r["published"])[:10] if r.get("published") else None)
         sid = sources.add(f"NSE {label}, page {r['page']}", f"{r['url']}#page={r['page']}",
-                          f"{symbol}: {r['title'][:120]}")
-        passages.append({"source": sid, "document": r["title"][:120], "page": r["page"], "text": r["text"][:1200]})
+                          f"{symbol}: {r['title'][:120]}", period)
+        passages.append({"source": sid, "document": r["title"][:120], "page": r["page"], "text": r["text"][:1200],
+                         **({"period": period} if period else {})})
     note = None if "annual_report" in have else "This company's annual report isn't indexed yet; only recent filings were searched."
     return {"passages": passages, **({"note": note} if note else {}),
             **({} if passages else {"result": "No matching passages found."})}
@@ -260,16 +313,43 @@ def _compare(args, sources: Sources):
             try:
                 r = research.company_report(sym)
                 row = {"symbol": r["profile"]["symbol"],
-                       **{k: v for k, v in screener.metrics_row(r["profile"], r["financials"]["years"]).items() if k != "yahoo_symbol"}}
+                       **{k: v for k, v in screener.metrics_row(r["profile"], r["financials"]["years"]).items() if k != "yahoo_symbol"},
+                       "latest_fiscal_year": (r["financials"]["years"] or [{}])[-1].get("year")}
             except LookupError:
                 rows.append({"symbol": sym, "error": "not found"})
                 continue
         sid = sources.add("SEC filings and Yahoo Finance quote" if us else "Company filings via Yahoo Finance",
                           f"https://finance.yahoo.com/quote/{yahoo.yahoo_ticker(row['symbol'])}",
-                          f"{row['name']} ({row['symbol']}): metrics")
+                          f"{row['name']} ({row['symbol']}): metrics", row.get("latest_fiscal_year"))
         rows.append({"source": sid, **row, "amount_unit": "$ M" if us else "₹ Cr"})
-    return {"companies": rows, "note": "ROCE and debt/equity are not computed for banks and financials. "
-                                       "Amounts are in each company's own currency (see amount_unit)."}
+    found = [r for r in rows if "error" not in r]
+    notes = ["ROCE and debt/equity are not computed for banks and financials.",
+             "Amounts are in each company's own currency (see amount_unit)."]
+    years = {r["latest_fiscal_year"] for r in found if r.get("latest_fiscal_year")}
+    if len(years) > 1:
+        notes.append(f"The latest annual figures cover different fiscal years ({', '.join(sorted(years))}); "
+                     "say so when comparing them.")
+    if len({r["amount_unit"] for r in found}) > 1:
+        notes.append("These companies report in different currencies: compare ratios, not amounts.")
+    out = {"companies": rows, "note": " ".join(notes)}
+    if len(found) >= 2:
+        sid = sources.add("FinSight calculator", None, "peer median and average of " + ", ".join(r["symbol"] for r in found))
+        out["peer_stats"] = {"source": sid, **_peer_stats(found)}
+    return out
+
+
+PEER_FIELDS = ("pe", "pb", "roe_pct", "roce_pct", "debt_to_equity", "revenue_cagr_pct", "profit_cagr_pct",
+               "operating_margin_pct", "dividend_yield_pct")
+
+
+def _peer_stats(rows: list[dict]) -> dict:
+    """Median and mean of each ratio over the companies that have it (ratios only: amounts mix currencies)."""
+    out = {}
+    for f in PEER_FIELDS:
+        vals = [r[f] for r in rows if isinstance(r.get(f), (int, float)) and not math.isnan(r[f])]
+        if len(vals) >= 2:
+            out[f] = {"median": statistics.median(vals), "average": statistics.fmean(vals), "companies": len(vals)}
+    return out
 
 
 def _screen(args, sources: Sources):
@@ -279,6 +359,103 @@ def _screen(args, sources: Sources):
     keep = ("symbol", "name", "market_cap_cr", "pe", "roe_pct", "debt_to_equity", "profit_cagr_pct")
     rows = [{k: r[k] for k in keep} for r in result["rows"][:10]]
     return {"source": sid, "query": result["query"], "count": result["count"], "top_10": rows}
+
+
+def _ipo_data(args, sources: Sources):
+    rows = ipos.current()
+    query = (args.get("query") or "").strip()
+    words = set(investorgain.normalize(query))   # "Tata Capital Ltd IPO" -> {"tata", "capital"}
+    if words:
+        rows = [r for r in rows if query.upper() in (r["symbol"], r.get("nse_symbol"))] or \
+            [r for r in rows if words <= set(investorgain.normalize(r["name"]))]
+        if not rows:
+            return {"ipos": [], "result": f"No tracked IPO matches '{query}'. FinSight tracks IPOs listed on "
+                                          "InvestorGain and NSE's current issues."}
+    else:
+        rows = [r for r in rows if r["status"] in ("Open", "Upcoming")]
+    rows = rows[:8]
+    summaries = gmp.summaries(rows)
+    out = []
+    for r in rows:
+        official = r["source"]["name"].startswith("NSE")
+        sid = sources.add("NSE IPO data" if official else "InvestorGain IPO data", r["source"]["url"],
+                          f"{r['name']}: issue details and subscription")
+        item = {"source": sid, **{k: r[k] for k in ("name", "segment", "exchange", "status", "open_date", "close_date",
+                                                     "allotment_date", "listing_date", "price_low", "price_high", "lot",
+                                                     "issue_size_cr", "subscription_times", "listing_gain_pct")}}
+        g = summaries[r["symbol"]]
+        if g["latest"]:
+            gid = sources.add("InvestorGain GMP (unofficial)", g["latest"]["source_url"], f"{r['name']}: grey-market premium",
+                              g["latest"]["observed_at"][:16])
+            item["gmp_unofficial"] = {"source": gid, "gmp_rs": g["latest"]["gmp"], "observed_at": g["latest"]["observed_at"],
+                                      **({"estimated_premium_pct": g["estimate"]["estimated_premium_pct"]} if g["estimate"] else {}),
+                                      "readings": len(g["history"]), "disclaimer": g["disclaimer"]}
+        out.append(item)
+    return {"ipos": out, "note": "Issue data from NSE is official; InvestorGain issue data is secondary. GMP is "
+                                 "unofficial grey-market data, not a forecast of the listing price."}
+
+
+def _benchmark(symbol: str) -> tuple[str, str]:
+    return ("^GSPC", "S&P 500") if sec.is_us(symbol) else ("^NSEI", "Nifty 50")
+
+
+def _technicals(args, sources: Sources):
+    symbol = yahoo.normalize_symbol(args["symbol"])
+    history = yahoo.price_history(symbol)
+    if len(history) < 30:
+        return {"symbol": symbol, "result": "Not enough price history for technical analysis."}
+    index, index_name = _benchmark(symbol)
+    try:
+        market = yahoo.price_history(index)
+    except Exception:
+        market = []
+    risk = portfolio.analyse([{"symbol": symbol, "weight": 1}], {symbol: history}, {}, market or None)
+    year = [p["close"] for p in history[-252:]]
+    src = sources.add("Yahoo Finance price history", f"https://finance.yahoo.com/quote/{yahoo.yahoo_ticker(symbol)}/history",
+                      f"{symbol}: daily closes", f"{history[0]['date']} to {history[-1]['date']}")
+    eng = sources.add("FinSight technicals engine", None, f"{symbol}: trend, returns, volatility and beta")
+    return {
+        "symbol": symbol,
+        "last_close": {"source": src, "date": history[-1]["date"], "close": history[-1]["close"],
+                       "high_52w": max(year), "low_52w": min(year)},
+        "indicators": {"source": eng, **technicals.summarize(history, "$" if sec.is_us(symbol) else "₹"),
+                       **technicals.period_returns(history),
+                       "beta_1y": risk.get("beta"), "beta_against": index_name if risk.get("beta") is not None else None},
+        "note": "Describes past price behaviour; it does not predict future prices.",
+    }
+
+
+def _portfolio_risk(args, sources: Sources):
+    holdings = [{"symbol": yahoo.normalize_symbol(h["symbol"]), "weight": float(h["weight"])} for h in args["holdings"][:15]]
+    merged: dict[str, float] = {}
+    for h in holdings:                       # the same stock listed twice counts once, with both weights
+        merged[h["symbol"]] = merged.get(h["symbol"], 0.0) + h["weight"]
+    holdings = [{"symbol": s, "weight": w} for s, w in merged.items()]
+    histories, sectors = {}, {}
+    for h in holdings:
+        try:
+            histories[h["symbol"]] = yahoo.price_history(h["symbol"])
+        except Exception:
+            histories[h["symbol"]] = []
+        try:
+            sectors[h["symbol"]] = yahoo.profile(h["symbol"]).get("sector")
+        except Exception:
+            sectors[h["symbol"]] = None
+    index, index_name = _benchmark(holdings[0]["symbol"])
+    if any(sec.is_us(h["symbol"]) != sec.is_us(holdings[0]["symbol"]) for h in holdings):
+        market = None   # Indian and US stocks: no single benchmark fits
+    else:
+        try:
+            market = yahoo.price_history(index)
+        except Exception:
+            market = None
+    result = portfolio.analyse(holdings, histories, sectors, market)
+    period = result.get("period")
+    src = sources.add("Yahoo Finance price history", None, "daily closes for " + ", ".join(merged),
+                      f"{period['from']} to {period['to']}" if period else None)
+    eng = sources.add("FinSight portfolio engine", None, "portfolio risk for " + ", ".join(merged))
+    return {"source": eng, "prices_source": src, **result,
+            "benchmark": index_name if result.get("beta") is not None else None}
 
 
 def _calculate(args, sources: Sources):
@@ -320,6 +497,9 @@ HANDLERS = {
     "search_documents": _search_documents,
     "compare_companies": _compare,
     "run_screen": _screen,
+    "get_ipo_data": _ipo_data,
+    "get_technicals": _technicals,
+    "portfolio_risk": _portfolio_risk,
     "calculate": _calculate,
 }
 

@@ -1,13 +1,23 @@
 """FinSight research assistant: Claude plans and explains, the analytics engine calculates.
 
 Flow per question:
-  1. Claude calls tools (company data, statements, valuation, news, screener, calculator).
-  2. Claude writes a structured answer citing source ids like [S3].
-  3. verify.unverified_numbers() checks every figure against the tool outputs. If any figure cannot be
+  1. intent.classify() picks the question type (company research, screening, IPO, portfolio risk...), which decides
+     the tools the model gets and the extra rules it follows.
+  2. Claude calls tools (company data, statements, valuation, news, filings, IPOs, technicals, screener, calculator).
+  3. Claude writes a structured answer citing source ids like [S3].
+  4. verify.unverified_numbers() checks every figure against the tool outputs. If any figure cannot be
      traced, Claude gets one chance to fix it; whatever remains is reported to the user, never hidden.
+  5. Deterministic warnings (stale data, mixed periods, unofficial sources, failed lookups) go with the answer.
 """
+import json
+from datetime import datetime, timedelta, timezone
+
+from app.ai import intent as I
 from app.ai import llm
 from app.ai import tools as T
+
+DISCLAIMER = "This is research assistance, not investment advice."
+STALE_GMP = timedelta(days=3)
 
 
 SYSTEM = """You are FinSight's research assistant for Indian retail investors (NSE/BSE stocks, IPOs and US-listed stocks).
@@ -21,13 +31,18 @@ Rules:
   the exact words in "double quotes" followed by the citation, e.g. "attrition was 13.3%" [S4].
 - Say plainly when data is missing. Round sensibly (48.72 -> 48.7%). Amounts are ₹ crore for Indian companies
   ("L Cr" = lakh crore) and $ million for US companies (see unit fields); keep each company in its own currency.
-- Plain language; briefly define jargon. No buy/sell advice or price targets; for the future, describe scenarios
-  and what to monitor. GMP is unofficial. Mention data_checks warnings when relevant.
+- Plain language; briefly define jargon. No buy/sell instructions, price targets or promised returns; for the
+  future, describe scenarios and what to monitor. GMP is unofficial: always say so. Mention data_checks warnings
+  when relevant.
+- Say which period each key figure covers (FY25, trailing twelve months, as of a date). Don't combine or compare
+  figures from different periods without saying so. If sources disagree, give both and say they differ.
 Answer in Markdown, 80-200 words: **Short answer** (2-3 sentences), then key figures as short bullets, then
 **Risks** (1-2 bullets). Add **What to watch** only if useful. No sources list. Write the whole answer in your final
 message, after all tool calls."""
 
 PREFETCH = [("get_company_snapshot", {}), ("get_financials", {})]
+# Intents where the company in view is usually the subject, so its data is sent up front
+PREFETCH_FOR = {"company_research", "company_comparison", "valuation", "filing_question", "technical_analysis"}
 
 
 def _context_for(symbol: str, sources: T.Sources) -> tuple[str, list[str]]:
@@ -53,13 +68,18 @@ def ask(question: str, symbol: str | None = None, history: list[dict] | None = N
     messages = _history(history)
     preloaded: list[str] = []
     content = question
+    kind = I.classify(question, symbol)
     if symbol:
-        data, preloaded = _context_for(symbol, sources)
-        content = (f"The user is viewing {symbol}; assume the question is about it unless it says otherwise.\n"
-                   f"Data already loaded:\n{data}\n\nQuestion: {question}")
+        content = f"The user is viewing {symbol}; assume the question is about it unless it says otherwise.\n"
+        if kind in PREFETCH_FOR:
+            data, preloaded = _context_for(symbol, sources)
+            content += f"Data already loaded:\n{data}\n"
+        content += f"\nQuestion: {question}"
     messages.append({"role": "user", "content": content})
+    system = f"{SYSTEM}\nThis is a {kind.replace('_', ' ')} question. {I.GUIDANCE[kind]}"
     try:
-        run = llm.run_agent(SYSTEM, messages, None, sources, question, task="assistant", preloaded=preloaded)
+        run = llm.run_agent(system, messages, I.tools_for(kind, symbol), sources, question, task="assistant",
+                            preloaded=preloaded)
     except llm.AIRefused:
         run = {"answer": "I can't help with that request. Try asking about a company's financials, valuation or news.",
                "calls": [], "unverified": [], "misattributed": [], "model": llm.model_spec("assistant"), "usage": {}}
@@ -69,7 +89,53 @@ def ask(question: str, symbol: str | None = None, history: list[dict] | None = N
     if v["unsupported_quotes"] or v["arithmetic"]:
         v["passed"] = False
         v["note"] = "Some quotes or calculations could not be confirmed against their sources. Treat them with caution."
-    return {**result, "usage": run["usage"]}
+    return {**result, "intent": kind, "warnings": warnings(run.get("outputs", preloaded), result["sources"], run["calls"]),
+            "data_timestamp": max((s["retrieved_at"] for s in sources.items), default=None),
+            "disclaimer": DISCLAIMER, "usage": run["usage"]}
+
+
+def _walk(node, key: str):
+    """Every value stored under `key` anywhere in a parsed tool result."""
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k == key:
+                yield v
+            yield from _walk(v, key)
+    elif isinstance(node, list):
+        for v in node:
+            yield from _walk(v, key)
+
+
+def warnings(outputs: list[str], cited: list[dict], calls: list[dict], now: datetime | None = None) -> list[str]:
+    """What the reader should know about the data behind the answer, worked out from the tool results themselves
+    (not from the model): data-quality checks, stale or mixed-period data, unofficial sources, failed lookups."""
+    now = now or datetime.now(timezone.utc)
+    out: list[str] = []
+    for text in outputs:
+        try:
+            data = json.loads(text)
+        except ValueError:
+            continue
+        for checks in _walk(data, "data_checks"):
+            out += checks
+        for note in _walk(data, "note"):
+            if isinstance(note, str) and "different fiscal years" in note:
+                out.append(next(s for s in note.split(". ") if "different fiscal years" in s).rstrip(".") + ".")
+        for ipos in _walk(data, "ipos"):
+            for ipo in ipos:   # an old reading only matters while the IPO is still to list
+                observed = (ipo.get("gmp_unofficial") or {}).get("observed_at")
+                if ipo.get("status") not in ("Open", "Upcoming") or not observed:
+                    continue
+                age = now - datetime.fromisoformat(observed)
+                if age > STALE_GMP:
+                    out.append(f"The latest GMP reading for {ipo['name']} is {age.days} days old ({observed[:10]}); "
+                               "grey-market prices move quickly.")
+    if any(s["source_type"] == "unofficial" for s in cited):
+        out.append("This answer uses grey-market premium (GMP) data, which is unofficial and unregulated.")
+    failed = sorted({c["tool"].replace("_", " ") for c in calls if c["error"]})
+    if failed:
+        out.append(f"Some data could not be retrieved ({', '.join(failed)}); the answer may be incomplete.")
+    return list(dict.fromkeys(out))   # drop repeats, keep order
 
 
 def _result(answer: str, sources: T.Sources, calls: list[dict], missing: list[str], model: str,

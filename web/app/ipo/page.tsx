@@ -3,10 +3,17 @@
 import { FormEvent, useEffect, useState } from "react";
 import Chart, { baseOption } from "@/components/Chart";
 import { Badge, Card, ErrorBox, InfoTip, Skeleton, SourceLink } from "@/components/ui";
+import AskPanel from "@/components/stock/AskPanel";
 import { api, GmpEntry, Ipo } from "@/lib/api";
 import { crore, date, pct, rupees } from "@/lib/format";
 
 const SEGMENTS = ["Mainboard", "SME", "All"] as const;
+const IPO_SUGGESTIONS = [
+  "Which IPOs are open right now, and how subscribed are they?",
+  "What is the price band, lot size and issue size of the open mainboard IPOs?",
+  "What is the latest GMP for the open IPOs, and why is it unofficial?",
+];
+
 const STAGES = [
   { id: "live", label: "Open & upcoming", statuses: ["Open", "Upcoming"] },
   { id: "done", label: "Closed & allotted", statuses: ["Closed", "Allotted"] },
@@ -236,6 +243,8 @@ export default function IpoPage() {
           );
         })}
       </div>
+
+      <AskPanel name="IPOs" suggestions={IPO_SUGGESTIONS} />
     </div>
   );
 }

@@ -196,13 +196,23 @@ export async function api<T>(path: string, init?: RequestInit, opts?: { auth?: b
   return res.json();
 }
 
-export type AskSource = { id: string; name: string; url: string | null; detail: string };
+export type SourceType = "official" | "secondary" | "unofficial";
+export type AskSource = {
+  id: string; name: string; url: string | null; detail: string;
+  source_type?: SourceType; period?: string | null; retrieved_at?: string;
+};
+export type AskIntent = "company_research" | "stock_screening" | "company_comparison" | "valuation" | "filing_question"
+  | "ipo_research" | "technical_analysis" | "portfolio_risk" | "general_finance";
 export type AskResult = {
   answer: string;
   sources: AskSource[];
   tool_calls: { tool: string; input: Record<string, unknown>; error: boolean }[];
   verification: { passed: boolean; unverified: string[]; misattributed?: string[]; unsupported_quotes?: string[]; arithmetic?: string[]; note: string };
   model: string;
+  intent?: AskIntent;
+  warnings?: string[];          // stale or mixed-period data, unofficial sources, failed lookups
+  data_timestamp?: string | null;
+  disclaimer?: string;
 };
 export type AiTask = "assistant" | "report" | "summary" | "screen";
 export type AiStatus = { configured: boolean; model: string; sign_in_required?: boolean; tasks: Record<AiTask, { model: string; configured: boolean }> };

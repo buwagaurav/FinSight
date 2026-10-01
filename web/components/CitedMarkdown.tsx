@@ -3,6 +3,7 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AskSource } from "@/lib/api";
+import { Badge } from "@/components/ui";
 
 /** Turn "[S1, S3]" citations into links the renderer draws as small source chips. */
 function linkCitations(text: string, sources: AskSource[]) {
@@ -51,7 +52,12 @@ export function SourceList({ sources }: { sources: AskSource[] }) {
       {sources.map((s) => (
         <li key={s.id} id={`src-${s.id}`} className="flex gap-2">
           <span className="font-medium text-accent shrink-0">{s.id}</span>
-          <span>{s.url ? <a href={s.url} target="_blank" rel="noreferrer" className="underline hover:text-ink">{s.name}</a> : s.name}: {s.detail}</span>
+          <span>
+            {s.url ? <a href={s.url} target="_blank" rel="noreferrer" className="underline hover:text-ink">{s.name}</a> : s.name}: {s.detail}
+            {s.period && <span className="text-muted"> · {s.period}</span>}
+            {s.source_type === "official" && <> <Badge variant="good">Official</Badge></>}
+            {s.source_type === "unofficial" && <> <Badge variant="warn">Unofficial</Badge></>}
+          </span>
         </li>
       ))}
     </ol>

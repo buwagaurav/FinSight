@@ -3,6 +3,8 @@
 Every number FinSight shows (and every number an AI explanation cites) comes from here, never
 from a language model doing arithmetic.
 """
+from datetime import date
+
 from app.providers.yahoo import CRORE
 
 # First key that exists wins. Banks and insurers use different line items than industrials.
@@ -32,6 +34,7 @@ LINE_ITEMS = {
     },
 }
 RAW_UNITS = {"reported_eps", "basic_shares"}  # not converted to crore
+STALE_AFTER_DAYS = 456   # ~15 months: a full fiscal year plus the 90 days companies get to publish results
 
 
 def _pick(row: dict, keys: list[str]):
@@ -114,9 +117,14 @@ def growth_summary(table: list[dict]) -> dict:
     }
 
 
-def data_checks(table: list[dict], profile: dict, converted_from: str | None = None) -> list[str]:
+def data_checks(table: list[dict], profile: dict, converted_from: str | None = None,
+                today: date | None = None) -> list[str]:
     """Cross-checks that tell the user when the numbers deserve extra scrutiny."""
     checks = []
+    end = table[-1].get("period_end") if table else None
+    if end and ((today or date.today()) - date.fromisoformat(end[:10])).days > STALE_AFTER_DAYS:
+        checks.append(f"The latest annual statements are for {table[-1]['year']} (year ended {end[:10]}); "
+                      "newer results may exist that aren't reflected here.")
     for prev, r in zip(table, table[1:]):
         # a big jump in equity that the year's own profit can't explain points to a merger or share issue
         # (fast-growing companies such as NVIDIA grow equity quickly from retained profit alone)

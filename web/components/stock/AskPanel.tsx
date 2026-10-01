@@ -3,13 +3,13 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import CitedMarkdown, { SourceList } from "@/components/CitedMarkdown";
 import { Badge, Card } from "@/components/ui";
-import { AiStatus, api, AskResult } from "@/lib/api";
+import { AiStatus, api, AskIntent, AskResult } from "@/lib/api";
 import SignInPrompt from "@/components/SignInPrompt";
 import { useUser } from "@/components/UserContext";
 
 type Turn = { id: number; question: string; result?: AskResult; error?: string };
 
-const SUGGESTIONS = [
+const COMPANY_SUGGESTIONS = [
   "Summarise the last 4 years of results in plain English",
   "Why did profit change differently from cash flow?",
   "What are the biggest risks right now?",
@@ -23,11 +23,31 @@ const TOOL_LABELS: Record<string, string> = {
   get_financials: "Read annual statements",
   get_valuation: "Read valuation and scenarios",
   get_news: "Read recent news",
+  get_announcements: "Read official filings",
   search_documents: "Searched annual report & filings",
   compare_companies: "Compared companies",
   run_screen: "Ran a screen",
+  get_ipo_data: "Read IPO data and GMP",
+  get_technicals: "Read price trend",
+  portfolio_risk: "Measured portfolio risk",
   calculate: "Calculated",
 };
+
+const INTENT_LABELS: Record<AskIntent, string> = {
+  company_research: "company research",
+  stock_screening: "stock screening",
+  company_comparison: "company comparison",
+  valuation: "valuation",
+  filing_question: "filings question",
+  ipo_research: "IPO research",
+  technical_analysis: "technical analysis",
+  portfolio_risk: "portfolio risk",
+  general_finance: "general finance",
+};
+
+function retrieved(iso: string) {
+  return new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+}
 
 function Answer({ result }: { result: AskResult }) {
   const v = result.verification;
@@ -48,10 +68,28 @@ function Answer({ result }: { result: AskResult }) {
         </div>
       )}
 
+      {(result.warnings ?? []).length > 0 && (
+        <div className="rounded-lg border border-warn/40 bg-warn-soft p-2.5 text-xs text-ink-2">
+          <div className="font-semibold text-warn mb-0.5">● Check before relying on this</div>
+          <ul className="space-y-0.5 pl-4 list-disc">
+            {result.warnings!.map((w) => <li key={w}>{w}</li>)}
+          </ul>
+        </div>
+      )}
+
       <SourceList sources={result.sources} />
 
+      {(result.data_timestamp || result.disclaimer) && (
+        <p className="text-xs text-muted">
+          {result.data_timestamp && <>Data retrieved {retrieved(result.data_timestamp)}. </>}
+          {result.disclaimer}
+        </p>
+      )}
+
       <details className="text-xs text-muted">
-        <summary className="cursor-pointer">How this was researched ({tools.length} steps · {result.model})</summary>
+        <summary className="cursor-pointer">
+          How this was researched ({result.intent ? `${INTENT_LABELS[result.intent]} · ` : ""}{tools.length} steps · {result.model})
+        </summary>
         <ul className="mt-1.5 space-y-0.5 pl-4 list-disc">
           {result.tool_calls.map((c, i) => (
             <li key={i} className={c.error ? "text-bad" : ""}>
@@ -66,7 +104,9 @@ function Answer({ result }: { result: AskResult }) {
   );
 }
 
-export default function AskPanel({ symbol, name }: { symbol: string; name: string }) {
+/** `symbol` is the company in view; leave it out for questions that aren't about one company (e.g. on the IPO page). */
+export default function AskPanel({ symbol, name, suggestions = COMPANY_SUGGESTIONS }:
+  { symbol?: string; name: string; suggestions?: string[] }) {
   const { user } = useUser();
   const [status, setStatus] = useState<AiStatus | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -105,7 +145,7 @@ export default function AskPanel({ symbol, name }: { symbol: string; name: strin
   }
 
   const asked = new Set(turns.map((t) => t.question));
-  const remaining = SUGGESTIONS.filter((s) => !asked.has(s));
+  const remaining = suggestions.filter((s) => !asked.has(s));
 
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -142,7 +182,7 @@ export default function AskPanel({ symbol, name }: { symbol: string; name: strin
         : <span className="text-xs text-muted hidden sm:block">Answers cite their sources · not investment advice</span>}>
       {turns.length === 0 && (
         <div className="flex flex-wrap gap-2 mb-3">
-          {SUGGESTIONS.map((s) => (
+          {suggestions.map((s) => (
             <button key={s} onClick={() => ask(s)} disabled={busy || !status}
               className="text-xs px-3 py-1.5 rounded-full border border-line hover:border-accent hover:text-accent text-ink-2 text-left disabled:opacity-50">
               {s}

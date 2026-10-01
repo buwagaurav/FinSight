@@ -43,3 +43,13 @@ def summarize(history: list[dict], currency_sign: str = "₹") -> dict:
         "max_drawdown_1y_pct": max_dd * 100,
         "reasons": reasons,
     }
+
+
+def period_returns(history: list[dict]) -> dict:
+    """Price change over 1, 3 and 6 months and 1 year (21/63/126/252 trading days)."""
+    closes = [p["close"] for p in history]
+    out = {}
+    for label, days in (("1m", 21), ("3m", 63), ("6m", 126), ("1y", 252)):
+        if len(closes) > days and closes[-days - 1] > 0:
+            out[f"return_{label}_pct"] = (closes[-1] / closes[-days - 1] - 1) * 100
+    return out
