@@ -77,7 +77,10 @@ class AITimeout(AIUnavailable):
     """The model didn't answer within the time budget."""
 
 
-TIMEOUT_MESSAGE = "FinSight AI took too long to answer. Please try again, or ask a narrower question."
+def timeout_message(provider: str) -> str:
+    name = {"anthropic": "Anthropic", "deepseek": "DeepSeek", "moonshot": "Kimi"}.get(provider, "The AI provider")
+    return (f"{name} is responding slowly right now, so FinSight AI couldn't answer in time. This is usually "
+            "temporary: please try again in a minute.")
 
 
 class AIRefused(Exception):
@@ -162,7 +165,7 @@ class AnthropicAdapter:
                 model=self.model, max_tokens=16000, system=system, messages=messages, cache_control={"type": "ephemeral"},
                 betas=[FALLBACK_BETA], fallbacks="default", **extra))
         except anthropic.APITimeoutError as e:
-            raise AITimeout(TIMEOUT_MESSAGE) from e
+            raise AITimeout(timeout_message("anthropic")) from e
         stop = {"tool_use": "tool_use", "refusal": "refusal", "max_tokens": "max_tokens"}.get(r.stop_reason, "end")
         return Turn(
             text="".join(b.text for b in r.content if b.type == "text").strip(),
@@ -187,12 +190,12 @@ class AnthropicAdapter:
 class OpenAICompatAdapter:
     """DeepSeek, Moonshot (Kimi) and self-hosted servers speak the OpenAI chat-completions protocol."""
 
-    def __init__(self, provider: str, model: str):
+    def __init__(self, provider: str, model: str, effort: str | None = None):
         cfg = PROVIDERS[provider]
         base_url = os.environ.get(cfg["base_url_env"]) if "base_url_env" in cfg \
             else os.environ.get(f"{provider.upper()}_BASE_URL", cfg["base_url"])  # override if a provider moves
         key = next((os.environ[k] for k in cfg["keys"] if k.endswith("_KEY") and os.environ.get(k)), "not-needed")
-        self.provider, self.model = provider, model
+        self.provider, self.model, self.effort = provider, model, effort
         self.client = openai.OpenAI(api_key=key, base_url=base_url)
 
     def _guard(self, fn):
@@ -214,12 +217,14 @@ class OpenAICompatAdapter:
         extra = {"tools": [self._tool(t) for t in tools]} if tools else {}
         if tools and final:
             extra["tool_choice"] = "none"
+        if self.effort:
+            extra["reasoning_effort"] = self.effort
         client = self.client.with_options(timeout=timeout, max_retries=0) if timeout else self.client
         try:
             r = self._guard(lambda: client.chat.completions.create(
                 model=self.model, max_tokens=3000, messages=[{"role": "system", "content": system}, *messages], **extra))
         except openai.APITimeoutError as e:
-            raise AITimeout(TIMEOUT_MESSAGE) from e
+            raise AITimeout(timeout_message(self.provider)) from e
         choice = r.choices[0]
         msg = choice.message
         calls = []
@@ -271,7 +276,20 @@ def adapter(task: str):
     if not is_configured(task):
         need = " or ".join(PROVIDERS[provider]["keys"][:2])
         raise AIUnavailable(f"No credentials for {model_spec(task)}. Set {need} in backend/.env.")
-    return AnthropicAdapter(model) if provider == "anthropic" else OpenAICompatAdapter(provider, model)
+    return AnthropicAdapter(model) if provider == "anthropic" else OpenAICompatAdapter(provider, model, effort(task))
+
+
+# DeepSeek's models think at "high" effort unless told otherwise, which made a two-line definition take 15 s or more.
+# Chat answers use "low": the facts come from tools and code, not from the model's reasoning. Set
+# FINSIGHT_EFFORT_<TASK> (low/high/max, or "default") to change it per task.
+EFFORT_DEFAULTS = {"assistant": "low"}
+EFFORT_PROVIDERS = {"deepseek"}   # providers known to accept reasoning_effort
+
+
+def effort(task: str) -> str | None:
+    provider, _ = _split(task)
+    value = os.environ.get(f"FINSIGHT_EFFORT_{task.upper()}") or EFFORT_DEFAULTS.get(task)
+    return value if provider in EFFORT_PROVIDERS and value in ("low", "high", "max") else None
 
 
 # ---------------------------------------------------------------- task entry points
@@ -280,7 +298,7 @@ def adapter(task: str):
 # round only runs with REPAIR_MIN seconds left; and no single call may take longer than its share, or CALL_FLOOR.
 FINAL_RESERVE = 5.0
 REPAIR_MIN = 6.0
-CALL_FLOOR = 8.0
+CALL_FLOOR = 15.0   # a slightly late answer beats an error
 
 def structured(output: type[M], system: str, content, task: str) -> M:
     """One call whose reply is validated against a Pydantic model."""

@@ -306,3 +306,16 @@ def test_period_and_metric_labels():
     assert conversation.period_label("revenue in FY2025 vs FY 24") == "FY24"
     assert conversation.period_label("Q2 FY26 results") == "Q2 FY26"
     assert conversation.metric_label("What was the operating margin and revenue?") == "operating margin"
+
+
+def test_chat_answers_ask_deepseek_for_low_reasoning_effort(monkeypatch):
+    monkeypatch.setenv("FINSIGHT_MODEL", "deepseek:deepseek-flash")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test")
+    assert llm.adapter("assistant").effort == "low"      # quick chat answers
+    assert llm.adapter("report").effort is None          # reports keep the provider's default
+    monkeypatch.setenv("FINSIGHT_EFFORT_ASSISTANT", "high")
+    assert llm.adapter("assistant").effort == "high"
+    monkeypatch.setenv("FINSIGHT_MODEL", "moonshot:kimi-k2")
+    monkeypatch.setenv("MOONSHOT_API_KEY", "test")
+    assert llm.effort("assistant") is None                # only sent to providers known to accept it
+    assert "DeepSeek is responding slowly" in llm.timeout_message("deepseek")
