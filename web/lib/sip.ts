@@ -1,4 +1,4 @@
-/** SIP (systematic investment plan) maths, matching SEBI's investor calculator
+/** SIP (systematic investment plan) and one-time (lump sum) investment maths. SIP matches SEBI's investor calculator
  * (investor.sebi.gov.in/calculators/sip_calculator.html): the future value of a fixed instalment paid at the end of
  * each period, with the annual return split evenly across periods (12% a year = 1% a month).
  *
@@ -8,8 +8,9 @@
 export type Frequency = "monthly" | "quarterly";
 export const PERIODS: Record<Frequency, number> = { monthly: 12, quarterly: 4 };
 
-// The same limits as SEBI's calculator
+// The same limits as SEBI's calculator (lumpSum: SEBI has no one-time calculator)
 export const LIMITS = {
+  lumpSum: { min: 500, max: 10000000, step: 500, initial: 100000 },
   amount: { min: 100, max: 500000, step: 100, initial: 5000 },
   rate: { min: 1, max: 30, step: 0.1, initial: 12 },
   years: { min: 1, max: 50, step: 1, initial: 15 },
@@ -25,6 +26,18 @@ export function sip(amount: number, frequency: Frequency, annualRatePct: number,
   const futureValue = r === 0 ? amount * n : amount * ((1 + r) ** n - 1) / r;
   const invested = amount * n;
   return { invested, futureValue, gains: futureValue - invested };
+}
+
+/** One-time investment left to grow, compounded yearly (SEBI has no lump-sum calculator; this is the standard
+ * formula Indian fund calculators use): FV = P × (1 + r)^years. */
+export function lumpSum(amount: number, annualRatePct: number, years: number): SipResult | null {
+  if (![amount, annualRatePct, years].every(Number.isFinite) || amount <= 0 || years <= 0) return null;
+  const futureValue = amount * (1 + annualRatePct / 100) ** years;
+  return { invested: amount, futureValue, gains: futureValue - amount };
+}
+
+export function lumpSumByYear(amount: number, annualRatePct: number, years: number) {
+  return Array.from({ length: Math.floor(years) }, (_, i) => ({ year: i + 1, ...lumpSum(amount, annualRatePct, i + 1)! }));
 }
 
 /** Value at the end of each year, for the growth chart. */

@@ -1,9 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Chart, { baseOption } from "@/components/Chart";
 import { Card } from "@/components/ui";
-import { Frequency, lakhCrore, LIMITS, PERIODS, sip, sipByYear } from "@/lib/sip";
+import { Frequency, lakhCrore, LIMITS, lumpSum, lumpSumByYear, PERIODS, sip, sipByYear } from "@/lib/sip";
+
+type Mode = "sip" | "lumpsum";
+const MODES: { id: Mode; label: string }[] = [{ id: "sip", label: "SIP" }, { id: "lumpsum", label: "One-time" }];
 
 type Limit = { min: number; max: number; step: number };
 
@@ -55,29 +58,49 @@ function Field({ id, label, unit, prefix, limit, value, onChange, format = (v: n
 const grouped = (v: number) => new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(v);
 
 export default function SipPage() {
+  // ?mode=lumpsum opens the one-time calculator, so a link can point straight at it
+  const [mode, setMode] = useState<Mode>("sip");
+  useEffect(() => { if (new URLSearchParams(window.location.search).get("mode") === "lumpsum") setMode("lumpsum"); }, []);
+  function switchMode(m: Mode) {
+    setMode(m);
+    history.replaceState(null, "", m === "lumpsum" ? "?mode=lumpsum" : window.location.pathname);
+  }
+  const [oneTime, setOneTime] = useState(LIMITS.lumpSum.initial);
   const [amount, setAmount] = useState(LIMITS.amount.initial);
   const [frequency, setFrequency] = useState<Frequency>("monthly");
   const [rate, setRate] = useState(LIMITS.rate.initial);
   const [years, setYears] = useState(LIMITS.years.initial);
-  const result = sip(amount, frequency, rate, years);
-  const growth = sipByYear(amount, frequency, rate, years);
+  const lump = mode === "lumpsum";
+  const result = lump ? lumpSum(oneTime, rate, years) : sip(amount, frequency, rate, years);
+  const growth = lump ? lumpSumByYear(oneTime, rate, years) : sipByYear(amount, frequency, rate, years);
 
   return (
     <div className="space-y-4">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">SIP calculator</h1>
         <p className="text-sm text-ink-2 mt-1 max-w-3xl">
-          See what a fixed monthly or quarterly investment could grow to at an assumed yearly return. Same method as
-          SEBI&apos;s investor calculator. Results update as you type.
+          See what a regular (SIP) or one-time investment could grow to at an assumed yearly return. The SIP figures use
+          the same method as SEBI&apos;s investor calculator. Results update as you type.
         </p>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
-        <Card title="Your SIP">
-          <div className="space-y-6">
-            <Field id="sip-amount" label="SIP amount" prefix="₹" limit={LIMITS.amount} value={amount} onChange={setAmount} format={grouped} />
+      <div role="tablist" aria-label="Investment type" className="inline-flex gap-1 bg-surface-2 rounded-lg p-0.5">
+        {MODES.map((m) => (
+          <button key={m.id} type="button" role="tab" aria-selected={mode === m.id} onClick={() => switchMode(m.id)}
+            className={`text-sm px-4 py-1.5 rounded-md ${mode === m.id ? "bg-surface shadow-sm font-medium" : "text-muted hover:text-ink"}`}>
+            {m.label}
+          </button>
+        ))}
+      </div>
 
-            <fieldset>
+      <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
+        <Card title={lump ? "Your one-time investment" : "Your SIP"}>
+          <div className="space-y-6">
+            {lump
+              ? <Field key="lumpsum" id="lumpsum-amount" label="Total investment" prefix="₹" limit={LIMITS.lumpSum} value={oneTime} onChange={setOneTime} format={grouped} />
+              : <Field key="sip" id="sip-amount" label="SIP amount" prefix="₹" limit={LIMITS.amount} value={amount} onChange={setAmount} format={grouped} />}
+
+            {!lump && <fieldset>
               <legend className="text-sm font-medium text-ink">Investment frequency</legend>
               <div role="radiogroup" className="mt-2 inline-flex gap-1 bg-surface-2 rounded-lg p-0.5">
                 {(["monthly", "quarterly"] as const).map((f) => (
@@ -87,7 +110,7 @@ export default function SipPage() {
                   </label>
                 ))}
               </div>
-            </fieldset>
+            </fieldset>}
 
             <Field id="sip-rate" label="Expected rate of return (p.a.)" unit="%" limit={LIMITS.rate} value={rate} onChange={setRate} />
             <Field id="sip-years" label="Investment duration" unit="years" limit={LIMITS.years} value={years} onChange={setYears} />
@@ -108,7 +131,9 @@ export default function SipPage() {
                 </div>
                 <div className="col-span-2 text-sm text-ink-2">
                   Estimated gains <span className="font-semibold text-ink tabular">{lakhCrore(result.gains)}</span>
-                  {" "}on {grouped(PERIODS[frequency] * years)} {frequency === "monthly" ? "monthly" : "quarterly"} instalments of ₹{grouped(amount)}
+                  {lump
+                    ? <> on ₹{grouped(oneTime)} invested once, over {years} {years === 1 ? "year" : "years"}</>
+                    : <> on {grouped(PERIODS[frequency] * years)} {frequency} instalments of ₹{grouped(amount)}</>}
                 </div>
               </dl>
               <Chart height={130} label={`Your investment ${lakhCrore(result.invested)}, future value ${lakhCrore(result.futureValue)}`}
@@ -155,11 +180,16 @@ export default function SipPage() {
           Market does not have a fixed rate of return and it is not possible to predict the rate of return.
         </p>
         <p className="mt-2 text-xs text-muted">
-          Assumes each instalment is invested at the end of its period and the yearly return is split evenly across
-          periods (12% a year = 1% a month), as in{" "}
-          <a href="https://investor.sebi.gov.in/calculators/sip_calculator.html" target="_blank" rel="noreferrer" className="underline hover:text-ink">
-            SEBI&apos;s SIP calculator
-          </a>. Taxes, fund expenses and exit loads are not included.
+          {lump ? (
+            <>Assumes the whole amount is invested on day one and the return compounds once a year: future value =
+              amount × (1 + return)<sup>years</sup>.</>
+          ) : (
+            <>Assumes each instalment is invested at the end of its period and the yearly return is split evenly across
+              periods (12% a year = 1% a month), as in{" "}
+              <a href="https://investor.sebi.gov.in/calculators/sip_calculator.html" target="_blank" rel="noreferrer" className="underline hover:text-ink">
+                SEBI&apos;s SIP calculator
+              </a>.</>
+          )}{" "}Taxes, fund expenses and exit loads are not included.
         </p>
       </div>
     </div>
