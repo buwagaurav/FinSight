@@ -34,6 +34,10 @@ cd backend && ../.venv/bin/pip install -r requirements-dev.txt && ../.venv/bin/p
 cd web && npm test
 ```
 
+Responsive check (with `npm run dev` and the API running): `cd web && npm run audit:responsive` opens every page at
+12 sizes from a 320px phone to a 1920px desktop, plus landscape, in your installed Chrome, and fails on sideways
+scrolling, anything past the screen edge, or console errors.
+
 Backend tests run against a throwaway PostgreSQL and stub out Yahoo, NSE and the AI providers, so they are free,
 offline and never touch your data. GitHub Actions runs both suites on every push.
 

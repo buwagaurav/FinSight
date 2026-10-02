@@ -300,10 +300,9 @@ def report_job(job_id: str):
 
 @app.get("/api/company/{symbol}/report")
 def latest_report(symbol: str):
-    saved = report.latest(yahoo.normalize_symbol(symbol))
-    if not saved:
-        raise HTTPException(404, "No report generated yet")
-    return saved
+    # null, not 404, when none exists yet: that's the normal state of most companies, and a 404 would log an error
+    # in every visitor's browser console
+    return report.latest(yahoo.normalize_symbol(symbol))
 
 
 class WatchRequest(BaseModel):

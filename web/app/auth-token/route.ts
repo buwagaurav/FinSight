@@ -8,10 +8,13 @@ import { auth, authEnabled } from "@/auth";
  */
 export async function GET() {
   const secret = process.env.FINSIGHT_API_JWT_SECRET;
-  if (!authEnabled || !secret) return Response.json({ error: "Sign-in is not configured" }, { status: 503 });
+  // No token isn't an error for the browser (signed out, or sign-in switched off): answering 200 keeps every page
+  // load from logging a failed request. The API still refuses AI requests that need a token.
+  const none = (reason: string) => Response.json({ token: null, reason }, { headers: { "Cache-Control": "no-store" } });
+  if (!authEnabled || !secret) return none("Sign-in is not configured");
   const session = await auth();
   const sub = (session?.user as { id?: string } | undefined)?.id ?? session?.user?.email;
-  if (!session?.user || !sub) return Response.json({ error: "Not signed in" }, { status: 401 });
+  if (!session?.user || !sub) return none("Not signed in");
 
   const expiresIn = 60 * 60;
   const token = await new SignJWT({ email: session.user.email, name: session.user.name, picture: session.user.image })

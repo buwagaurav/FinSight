@@ -1,12 +1,16 @@
-import { ReactNode } from "react";
+"use client";
+
+import { ReactNode, useEffect, useId, useRef, useState } from "react";
 import { GLOSSARY } from "@/lib/glossary";
 import { tone } from "@/lib/format";
+import { popoverPosition } from "@/lib/position";
 
 export function Card({ title, action, children, className = "" }: { title?: ReactNode; action?: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <section className={`bg-surface border border-line rounded-xl p-4 sm:p-5 ${className}`}>
+    // min-w-0: a card in a grid may shrink below its content's natural width (long names truncate instead)
+    <section className={`min-w-0 bg-surface border border-line rounded-xl p-4 sm:p-5 ${className}`}>
       {(title || action) && (
-        <div className="flex items-center justify-between gap-3 mb-3">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 mb-3">
           {title && <h2 className="text-sm font-semibold text-ink">{title}</h2>}
           {action}
         </div>
@@ -36,19 +40,44 @@ export function LabelBadge({ label }: { label: string }) {
   return <Badge variant={t}><span aria-hidden className="text-[9px]">{LABEL_ICON[t]}</span>{label}</Badge>;
 }
 
+/** "?" next to a term: opens its glossary text on tap, hover or keyboard focus. The text is only in the page while
+ * open and is placed to stay inside the screen, so it never causes sideways scrolling on a phone. */
 export function InfoTip({ term }: { term: string }) {
   const text = GLOSSARY[term];
+  const id = useId();
+  const btn = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState<ReturnType<typeof popoverPosition> | null>(null);
+
+  function open() {
+    const b = btn.current?.getBoundingClientRect();
+    if (b) setPos(popoverPosition(b, window.innerWidth));
+  }
+
+  useEffect(() => {
+    if (!pos) return;
+    const close = (e: Event) => { if (!(e.target instanceof Node && btn.current?.contains(e.target))) setPos(null); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setPos(null); };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("scroll", () => setPos(null), { once: true, capture: true });
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("pointerdown", close); window.removeEventListener("keydown", onKey); };
+  }, [pos]);
+
   if (!text) return null;
   return (
-    <span className="relative inline-block group align-middle ml-1">
-      <button type="button" aria-label={`What is ${term}?`}
-        className="w-4 h-4 rounded-full border border-line text-[10px] leading-none text-muted hover:text-ink hover:border-ink-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+    <span className="inline-block align-middle ml-1">
+      <button ref={btn} type="button" aria-label={`What is ${term}?`} aria-expanded={!!pos} aria-describedby={pos ? id : undefined}
+        onClick={open} onMouseEnter={open}   /* a tap focuses then clicks: both open; tapping elsewhere closes */ onMouseLeave={() => setPos(null)}
+        onFocus={open} onBlur={() => setPos(null)}
+        className="tap-exempt relative w-4 h-4 rounded-full border border-line text-[10px] leading-none text-muted hover:text-ink hover:border-ink-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent before:absolute before:-inset-3 before:content-['']">
         ?
       </button>
-      <span role="tooltip"
-        className="pointer-events-none absolute z-30 left-1/2 -translate-x-1/2 bottom-6 w-64 rounded-lg bg-ink text-bg text-xs font-normal leading-relaxed p-3 shadow-lg opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
-        {text}
-      </span>
+      {pos && (
+        <span id={id} role="tooltip" style={{ left: pos.left, top: pos.top, width: pos.width }}
+          className={`fixed z-50 rounded-lg bg-ink text-bg text-xs font-normal leading-relaxed p-3 shadow-lg ${pos.above ? "-translate-y-full" : ""}`}>
+          {text}
+        </span>
+      )}
     </span>
   );
 }

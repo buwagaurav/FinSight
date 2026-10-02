@@ -4,7 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, SearchResult } from "@/lib/api";
 
-export default function SearchBox({ large = false, autoFocus = false }: { large?: boolean; autoFocus?: boolean }) {
+/** `inline`: results push the content down instead of floating over it (inside the mobile menu's scrolling panel,
+ * where a floating list would be clipped). */
+export default function SearchBox({ large = false, autoFocus = false, inline = false }:
+  { large?: boolean; autoFocus?: boolean; inline?: boolean }) {
   const router = useRouter();
   const [q, setQ] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -66,13 +69,13 @@ export default function SearchBox({ large = false, autoFocus = false }: { large?
         className={`w-full bg-surface border border-line rounded-xl outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 placeholder:text-muted ${large ? "text-lg px-5 py-4 shadow-sm" : "text-sm px-3 py-2"}`}
       />
       {open && q.trim().length >= 2 && (
-        <ul role="listbox" className="absolute z-40 mt-2 w-full bg-surface border border-line rounded-xl shadow-lg overflow-hidden">
+        <ul role="listbox" className={`${inline ? "" : "absolute z-40"} mt-2 w-full bg-surface border border-line rounded-xl shadow-lg overflow-hidden`}>
           {loading && results.length === 0 && <li className="px-4 py-3 text-sm text-muted">Searching…</li>}
           {!loading && results.length === 0 && <li className="px-4 py-3 text-sm text-muted">No Indian or US listed company found</li>}
           {results.map((r, i) => (
             <li key={r.symbol} role="option" aria-selected={i === active}
               onMouseEnter={() => setActive(i)} onMouseDown={() => go(r.symbol)}
-              className={`px-4 py-2.5 cursor-pointer flex items-center justify-between gap-3 ${i === active ? "bg-surface-2" : ""}`}>
+              className={`px-4 py-2.5 min-h-11 cursor-pointer flex items-center justify-between gap-3 ${i === active ? "bg-surface-2" : ""}`}>
               <span className="min-w-0">
                 <span className="block text-sm font-medium truncate">{r.name}</span>
                 <span className="block text-xs text-muted">{r.symbol.split(".")[0]} · {r.exchange}{r.sector ? ` · ${r.sector}` : ""}</span>

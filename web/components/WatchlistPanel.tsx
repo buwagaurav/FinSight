@@ -105,7 +105,7 @@ export default function WatchlistPanel() {
         )}
         {list && all.length > 0 && <span className="text-xs font-normal text-muted">{items.length} of {list.limit}</span>}
       </span>}
-      action={<Link href={`/screener?market=${shown}`} className="text-sm text-accent hover:underline">Find stocks to watch →</Link>}>
+      action={<Link href={`/screener?market=${shown}`} className="tap text-sm text-accent hover:underline">Find stocks to watch →</Link>}>
       {error && <p className="text-sm text-bad">{error}</p>}
       {!list && !error && <div className="space-y-2"><Skeleton className="h-12" /><Skeleton className="h-12" /></div>}
       {list && all.length === 0 && (
@@ -120,7 +120,7 @@ export default function WatchlistPanel() {
         </div>
       )}
       {items.length > 0 && (
-        <div className="-mx-4 overflow-x-auto sm:mx-0">
+        <div className="scroll-shadow -mx-4 overflow-x-auto sm:mx-0">
           <table className="w-full min-w-[760px] text-sm tabular-nums">
             <thead>
               <tr className="border-b border-line text-xs text-muted">

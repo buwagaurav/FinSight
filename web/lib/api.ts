@@ -176,8 +176,10 @@ async function apiToken(): Promise<string | null> {
   if (cachedToken && cachedToken.expires_at - Date.now() > 60_000) return cachedToken.token;
   const res = await fetch("/auth-token", { cache: "no-store" });
   if (!res.ok) return null;
-  cachedToken = await res.json();
-  return cachedToken!.token;
+  const body = await res.json();
+  if (!body.token) return null;   // signed out, or sign-in isn't configured
+  cachedToken = body;
+  return body.token;
 }
 
 export async function api<T>(path: string, init?: RequestInit, opts?: { auth?: boolean }): Promise<T> {

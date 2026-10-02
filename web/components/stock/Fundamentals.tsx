@@ -126,7 +126,7 @@ export default function Fundamentals({ c }: { c: Company }) {
 
       <Card title={`Financial statements (${c.financials.unit})`}
         action={<button onClick={() => setCompact(!compact)} className="text-sm text-accent hover:underline">{compact ? "Show balance sheet & cash flow" : "Show fewer rows"}</button>}>
-        <div className="overflow-x-auto -mx-4 sm:mx-0">
+        <div className="scroll-shadow overflow-x-auto -mx-4 sm:mx-0">
           <table className="w-full text-sm tabular min-w-[520px]">
             <thead>
               <tr className="text-xs text-muted border-b border-line">

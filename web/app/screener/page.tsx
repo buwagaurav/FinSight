@@ -71,6 +71,15 @@ function Screener() {
   const [error, setError] = useState<string | null>(null);
   const [allSectors, setAllSectors] = useState<string[]>([]);
   const [sectors, setSectors] = useState<string[]>([]);
+  // Phones: the 11 sector chips fold away behind a toggle so the filters and results come first
+  const [sectorsOpen, setSectorsOpen] = useState(true);
+  useEffect(() => {
+    const phone = window.matchMedia("(max-width: 767px)");
+    if (phone.matches) setSectorsOpen(false);
+    const reopen = () => { if (!phone.matches) setSectorsOpen(true); };   // wider screens have no toggle
+    phone.addEventListener("change", reopen);
+    return () => phone.removeEventListener("change", reopen);
+  }, []);
   const [ai, setAi] = useState<AiStatus | null>(null);
   const [nl, setNl] = useState("");
   const [parsing, setParsing] = useState(false);
@@ -194,13 +203,19 @@ function Screener() {
 
       <Card title="Your screen">
         {allSectors.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mb-3" aria-label="Sectors">
-            <span className="text-xs text-muted w-10 pt-1">Sector</span>
-            {allSectors.map((sec) => (
-              <button key={sec} onClick={() => toggleSector(sec)} aria-pressed={sectors.includes(sec)}
-                className={`text-xs px-2.5 py-1 rounded-full border ${sectors.includes(sec) ? "border-accent bg-accent-soft text-accent" : "border-line text-ink-2 hover:border-ink-2"}`}>{sec}</button>
-            ))}
-          </div>
+          <details open={sectorsOpen} onToggle={(e) => setSectorsOpen(e.currentTarget.open)} className="mb-3 group/sectors">
+            <summary className="md:hidden flex items-center gap-2 min-h-11 cursor-pointer text-sm text-ink-2 list-none [&::-webkit-details-marker]:hidden">
+              <span aria-hidden className="text-xs transition-transform group-open/sectors:rotate-90">▶</span>
+              Sector{sectors.length > 0 ? <span className="text-accent font-medium">· {sectors.length} selected</span> : <span className="text-muted">· all</span>}
+            </summary>
+            <div className="flex flex-wrap gap-1.5 mt-1 md:mt-0" aria-label="Sectors">
+              <span className="hidden md:inline text-xs text-muted w-10 pt-1">Sector</span>
+              {allSectors.map((sec) => (
+                <button key={sec} onClick={() => toggleSector(sec)} aria-pressed={sectors.includes(sec)}
+                  className={`text-xs px-2.5 py-1 rounded-full border ${sectors.includes(sec) ? "border-accent bg-accent-soft text-accent" : "border-line text-ink-2 hover:border-ink-2"}`}>{sec}</button>
+              ))}
+            </div>
+          </details>
         )}
         <div className="space-y-2">
           {filters.map((f, i) => (
@@ -250,7 +265,7 @@ function Screener() {
           )}
           {/* Own scroll area so the header row (and the company column) stay visible while scrolling.
               Page-level sticky can't work here: a horizontally scrolling wrapper becomes the sticky container. */}
-          <div className={`overflow-auto max-h-[70vh] -mx-4 sm:mx-0 rounded-lg border border-line ${loading ? "opacity-60" : ""}`}>
+          <div className={`scroll-shadow overflow-auto max-h-[70vh] -mx-4 sm:mx-0 rounded-lg border border-line ${loading ? "opacity-60" : ""}`}>
             <table className="w-full text-sm tabular min-w-[760px] border-separate border-spacing-0">
               <thead>
                 <tr className="text-xs text-muted">
@@ -273,7 +288,7 @@ function Screener() {
                       <div className="flex items-center gap-1.5">
                         <StarButton symbol={r.symbol} compact />
                         <div className="min-w-0">
-                          <Link href={`/stock/${r.symbol}`} className="font-medium hover:text-accent block truncate" title={r.name}>{r.name}</Link>
+                          <Link href={`/stock/${r.symbol}`} className="font-medium hover:text-accent block truncate py-1 -my-1" title={r.name}>{r.name}</Link>
                           <div className="text-xs text-muted truncate">{r.symbol.split(".")[0]}{r.sector ? ` · ${r.sector}` : ""}</div>
                         </div>
                       </div>

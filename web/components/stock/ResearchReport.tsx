@@ -40,7 +40,7 @@ export default function ResearchReport({ symbol, name }: { symbol: string; name:
 
   useEffect(() => {
     api<AiStatus>("/api/ai/status").then(setAi).catch(() => {});
-    api<ReportResult>(`/api/company/${encodeURIComponent(symbol)}/report`).then(setReport).catch(() => setReport(null));
+    api<ReportResult | null>(`/api/company/${encodeURIComponent(symbol)}/report`).then(setReport).catch(() => setReport(null));
     return () => { if (timer.current) clearInterval(timer.current); };
   }, [symbol]);
 

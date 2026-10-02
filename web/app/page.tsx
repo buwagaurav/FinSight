@@ -62,7 +62,7 @@ export default async function Landing() {
   return (
     <div className="space-y-16 sm:space-y-24 py-4 sm:py-10">
       {/* ---------- hero ---------- */}
-      <section className="relative grid lg:grid-cols-[1.1fr_1fr] gap-10 lg:gap-14 items-center">
+      <section className="relative grid lg:grid-cols-[1.1fr_1fr] gap-10 lg:gap-14 items-center [overflow-x:clip] lg:[overflow-x:visible]">
         {/* backdrop: soft accent glow over a faint dot grid */}
         <div aria-hidden="true" className="pointer-events-none absolute -inset-x-6 -inset-y-10 -z-10 overflow-hidden [mask-image:radial-gradient(ellipse_at_center,black_45%,transparent_78%)]">
           <div className="absolute inset-0 opacity-[0.55] [background-image:radial-gradient(var(--line)_1px,transparent_1px)] [background-size:22px_22px] [mask-image:radial-gradient(ellipse_at_center,black_35%,transparent_75%)]" />

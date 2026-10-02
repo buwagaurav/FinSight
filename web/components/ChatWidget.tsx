@@ -39,6 +39,18 @@ export default function ChatWidget() {
   const symbol = path.match(/^\/stock\/([^/]+)/)?.[1];
   const ticker = symbol ? decodeURIComponent(symbol).toUpperCase().replace(/\.(NS|BO)$/, "") : undefined;
 
+  // iOS Safari keeps fixed elements where they were when the keyboard opens, so the chat input would sit under the
+  // keyboard. Lift the panel by the keyboard's height (Android Chrome resizes the page itself; then this is 0).
+  const [keyboard, setKeyboard] = useState(0);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!open || !vv) return;
+    const update = () => setKeyboard(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => { vv.removeEventListener("resize", update); vv.removeEventListener("scroll", update); setKeyboard(0); };
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
@@ -50,7 +62,8 @@ export default function ChatWidget() {
     <>
       {used && (
         <div role="dialog" aria-label="Ask FinSight AI" hidden={!open}
-          className="fixed z-40 left-4 right-4 sm:left-auto sm:w-[440px] bottom-[calc(5rem+env(safe-area-inset-bottom,0px))] max-h-[min(680px,calc(100dvh-7rem))] overflow-y-auto overscroll-contain rounded-xl shadow-2xl">
+          style={keyboard ? { bottom: keyboard + 8, maxHeight: `calc(100dvh - ${keyboard + 16}px)` } : undefined}
+          className="fixed z-40 left-[max(1rem,env(safe-area-inset-left))] right-[max(1rem,env(safe-area-inset-right))] sm:left-auto sm:w-[440px] bottom-[calc(5rem+env(safe-area-inset-bottom,0px))] max-h-[min(680px,calc(100dvh-7rem-env(safe-area-inset-top,0px)))] overflow-y-auto overscroll-contain rounded-xl shadow-2xl">
           <AskPanel symbol={symbol ? decodeURIComponent(symbol) : undefined}
             name={ticker ?? "stocks, IPOs & finance"}
             suggestions={symbol ? COMPANY : BY_PAGE[path] ?? GENERAL}
@@ -58,7 +71,8 @@ export default function ChatWidget() {
         </div>
       )}
       <button type="button" onClick={() => { setUsed(true); setOpen((o) => !o); }} aria-expanded={open}
-        className="fixed z-40 right-4 bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] flex items-center gap-2 rounded-full bg-accent text-white text-sm font-medium pl-3.5 pr-4 py-2.5 shadow-lg hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2">
+        /* while typing the panel uses the space; the button would sit on the keyboard */
+        className={`${keyboard > 0 ? "hidden" : "flex"} fixed z-40 right-[max(1rem,env(safe-area-inset-right))] bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] min-h-11 items-center gap-2 rounded-full bg-accent text-white text-sm font-medium pl-3.5 pr-4 py-2.5 shadow-lg hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2`}>
         <span aria-hidden>{open ? "✕" : "✦"}</span>
         {open ? "Close" : "Ask FinSight"}
       </button>

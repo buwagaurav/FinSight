@@ -51,7 +51,7 @@ export function baseOption(c: ChartColors): EChartsOption {
       type: "category",
       axisLine: { lineStyle: { color: c.line } },
       axisTick: { show: false },
-      axisLabel: { color: c.muted, fontSize: 11 },
+      axisLabel: { color: c.muted, fontSize: 11, hideOverlap: true },   // narrow phones: drop labels, don't overlap them
     },
     yAxis: {
       type: "value",

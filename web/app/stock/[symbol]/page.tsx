@@ -54,7 +54,7 @@ export default function StockPage() {
       <Header c={data} />
       <ScorePanel c={data} />
       <AskPanel symbol={data.profile.symbol} name={data.profile.name} />
-      <div role="tablist" className="sticky top-16 z-20 bg-bg/90 backdrop-blur -mx-4 px-4 sm:mx-0 sm:px-0 flex gap-1 border-b border-line overflow-x-auto">
+      <div role="tablist" className="sticky top-[calc(4rem+env(safe-area-inset-top))] z-20 bg-bg/90 backdrop-blur -mx-4 px-4 sm:mx-0 sm:px-0 flex gap-1 border-b border-line overflow-x-auto">
         {TABS.map((t) => (
           <button key={t} role="tab" aria-selected={tab === t} onClick={() => { setTab(t); history.replaceState(null, "", `#${slug(t)}`); }}
             className={`px-3 py-2.5 text-sm whitespace-nowrap border-b-2 -mb-px ${tab === t ? "border-accent text-ink font-medium" : "border-transparent text-muted hover:text-ink"}`}>

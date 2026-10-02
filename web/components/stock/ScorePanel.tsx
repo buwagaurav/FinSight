@@ -17,8 +17,8 @@ const BAR = { good: "bg-good", warn: "bg-warn", bad: "bg-bad", neutral: "bg-acce
 function ScoreTile({ id, card, open, onToggle }: { id: (typeof ORDER)[number]; card: ScoreCard; open: boolean; onToggle: () => void }) {
   return (
     <button type="button" onClick={onToggle} aria-expanded={open}
-      className={`text-left rounded-xl border p-3 transition-colors ${open ? "border-accent bg-accent-soft/40" : "border-line hover:border-ink-2"}`}>
-      <div className="flex items-center justify-between gap-2">
+      className={`flex flex-col text-left rounded-xl border p-3 transition-colors ${open ? "border-accent bg-accent-soft/40" : "border-line hover:border-ink-2"}`}>
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
         <span className="text-sm font-medium">{card.name}</span>
         <LabelBadge label={card.label} />
       </div>
@@ -30,7 +30,7 @@ function ScoreTile({ id, card, open, onToggle }: { id: (typeof ORDER)[number]; c
         <div className={`h-full rounded-full ${BAR[tone(card.label)]}`} style={{ width: `${card.score ?? 0}%` }} />
       </div>
       <div className="text-xs text-muted mt-2 leading-snug">{HINTS[id]}</div>
-      <div className="text-xs text-accent mt-2">{open ? "Hide reasons" : "Why this score?"}</div>
+      <div className="text-xs text-accent mt-auto pt-2">{open ? "Hide reasons" : "Why this score?"}</div>
     </button>
   );
 }
@@ -92,7 +92,7 @@ export default function ScorePanel({ c }: { c: Company }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 min-[400px]:grid-cols-2 lg:grid-cols-4 gap-3">
         {ORDER.map((id) => (
           <ScoreTile key={id} id={id} card={s.cards[id]} open={open === id} onToggle={() => setOpen(open === id ? null : id)} />
         ))}

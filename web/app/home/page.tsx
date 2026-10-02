@@ -56,7 +56,7 @@ export default function Home() {
         <div className="mt-4 flex flex-wrap justify-center gap-2">
           {POPULAR.map((p) => (
             <Link key={p.symbol} href={`/stock/${p.symbol}`}
-              className="text-sm px-3 py-1.5 rounded-full border border-line bg-surface hover:border-accent hover:text-accent">
+              className="tap text-sm px-3 py-1.5 rounded-full border border-line bg-surface hover:border-accent hover:text-accent">
               {p.name}
             </Link>
           ))}
@@ -65,7 +65,7 @@ export default function Home() {
           <span className="text-xs font-medium text-muted">US</span>
           {POPULAR_US.map((p) => (
             <Link key={p.symbol} href={`/stock/${p.symbol}`}
-              className="text-sm px-3 py-1.5 rounded-full border border-line bg-surface hover:border-accent hover:text-accent">
+              className="tap text-sm px-3 py-1.5 rounded-full border border-line bg-surface hover:border-accent hover:text-accent">
               {p.name}
             </Link>
           ))}
@@ -76,7 +76,7 @@ export default function Home() {
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2" title={<>IPOs open now {ipos && <span className="ml-1 text-xs font-normal text-muted">{openNow.length}</span>} <InfoTip term="Subscription" /></>}
-          action={<Link href="/ipo" className="text-sm text-accent hover:underline">All IPOs & GMP →</Link>}>
+          action={<Link href="/ipo" className="tap text-sm text-accent hover:underline">All IPOs & GMP →</Link>}>
           {ipoError && <p className="text-sm text-muted">IPO data is unavailable right now.</p>}
           {!ipos && !ipoError && <div className="space-y-2"><Skeleton className="h-12" /><Skeleton className="h-12" /><Skeleton className="h-12" /></div>}
           {ipos && openNow.length === 0 && <p className="text-sm text-muted">No IPOs are open today.</p>}
@@ -98,7 +98,7 @@ export default function Home() {
           </ul>
         </Card>
 
-        <Card title="Start with a screen" action={<Link href="/screener" className="text-sm text-accent hover:underline">Build your own →</Link>}>
+        <Card title="Start with a screen" action={<Link href="/screener" className="tap text-sm text-accent hover:underline">Build your own →</Link>}>
           <ul className="space-y-2">
             {SCREENS.map((s) => (
               <li key={s.preset}>

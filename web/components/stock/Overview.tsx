@@ -54,7 +54,7 @@ export default function Overview({ c }: { c: Company }) {
             ...base,
             legend: { show: false },
             tooltip: { ...base.tooltip, valueFormatter: (v) => money(Number(v), cur) },
-            xAxis: { type: "time", axisLine: { lineStyle: { color: k.line } }, axisLabel: { color: k.muted, fontSize: 11 }, splitLine: { show: false } },
+            xAxis: { type: "time", axisLine: { lineStyle: { color: k.line } }, axisLabel: { color: k.muted, fontSize: 11, hideOverlap: true }, splitLine: { show: false } },
             yAxis: { ...base.yAxis, scale: true } as never,
             series: [{
               type: "line", name: "Close", showSymbol: false, data: prices.map((p) => [p.date, p.close]),
@@ -84,7 +84,7 @@ export default function Overview({ c }: { c: Company }) {
           <div className="flex flex-wrap gap-4 mt-3 text-sm">
             {c.profile.promoter_holding_pct != null && <span className="text-ink-2">Promoter / insider holding: <b className="text-ink">{pct(c.profile.promoter_holding_pct)}</b><InfoTip term="Promoter holding" /></span>}
             {c.profile.institutional_holding_pct != null && <span className="text-ink-2">Institutional holding: <b className="text-ink">{pct(c.profile.institutional_holding_pct)}</b></span>}
-            {c.profile.website && <a href={c.profile.website} target="_blank" rel="noreferrer" className="text-accent hover:underline">Company website ↗</a>}
+            {c.profile.website && <a href={c.profile.website} target="_blank" rel="noreferrer" className="tap text-accent hover:underline">Company website ↗</a>}
           </div>
         </Card>
       )}
