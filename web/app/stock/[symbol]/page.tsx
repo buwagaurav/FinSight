@@ -9,12 +9,12 @@ import ScorePanel from "@/components/stock/ScorePanel";
 import Overview from "@/components/stock/Overview";
 import Fundamentals from "@/components/stock/Fundamentals";
 import Valuation from "@/components/stock/Valuation";
-import News from "@/components/stock/News";
+import News, { newsPath } from "@/components/stock/News";
 import AskPanel from "@/components/stock/AskPanel";
-import Filings from "@/components/stock/Filings";
+import Filings, { CACHE_SECONDS, filingsPath } from "@/components/stock/Filings";
 import ResearchReport from "@/components/stock/ResearchReport";
 import { ErrorBox, Skeleton } from "@/components/ui";
-import { api, Company } from "@/lib/api";
+import { api, Company, prefetch } from "@/lib/api";
 
 const TABS = ["Overview", "Fundamentals", "Valuation", "Filings & news", "AI report"] as const;
 type Tab = (typeof TABS)[number];
@@ -32,9 +32,16 @@ export default function StockPage() {
     setError(null);
     const fromHash = TABS.find((t) => slug(t) === window.location.hash.slice(1));
     setTab(fromHash ?? "Overview");
-    api<Company>(`/api/company/${encodeURIComponent(sym)}`)
-      .then((d) => { setData(d); document.title = `${d.profile.name} · FinSight`; })
+    let idle: number | undefined;
+    api<Company>(`/api/company/${encodeURIComponent(sym)}`, undefined, { cache: 120 })
+      .then((d) => {
+        setData(d);
+        document.title = `${d.profile.name} · FinSight`;
+        // Once the page is up, load the filings and news tab's data quietly so that tab opens instantly
+        idle = window.setTimeout(() => { prefetch(filingsPath(sym), CACHE_SECONDS); prefetch(newsPath(sym), CACHE_SECONDS); }, 1200);
+      })
       .catch((e: Error) => setError(e.message));
+    return () => window.clearTimeout(idle);
   }, [sym]);
 
   if (error) return <ErrorBox message={`Couldn't load ${sym}: ${error}. Try searching by company name.`} />;

@@ -5,12 +5,14 @@ import { Card, Skeleton } from "@/components/ui";
 import { api, NewsItem } from "@/lib/api";
 import { date } from "@/lib/format";
 
+export const newsPath = (symbol: string) => `/api/company/${encodeURIComponent(symbol)}/news`;
+
 export default function News({ symbol }: { symbol: string }) {
   const [items, setItems] = useState<NewsItem[] | null>(null);
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    api<NewsItem[]>(`/api/company/${encodeURIComponent(symbol)}/news`).then(setItems).catch(() => setError(true));
+    api<NewsItem[]>(newsPath(symbol), undefined, { cache: 300 }).then(setItems).catch(() => setError(true));
   }, [symbol]);
 
   return (

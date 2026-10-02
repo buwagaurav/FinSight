@@ -4,7 +4,8 @@ import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import type { EChartsOption } from "echarts";
 
-const ReactECharts = dynamic(() => import("echarts-for-react"), { ssr: false });
+// Loaded only when a chart is on screen; EChartsCore registers just the chart types FinSight uses
+const ReactECharts = dynamic(() => import("./EChartsCore"), { ssr: false });
 
 export type ChartColors = {
   ink: string; ink2: string; muted: string; line: string; surface: string;

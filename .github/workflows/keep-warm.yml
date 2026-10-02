@@ -1,0 +1,28 @@
+# Render's free web service sleeps after ~15 minutes without traffic, and the first visitor then waits 30-60 s while
+# it starts (with an empty cache). A health check every 10 minutes keeps it awake. One always-on free service uses
+# ~744 of the 750 free instance hours a month.
+#
+# Setup: Settings > Secrets and variables > Actions > Variables > New repository variable
+#   FINSIGHT_API_URL = https://<your-api>.onrender.com
+name: Keep API awake
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # GitHub may run scheduled jobs a few minutes late; still well inside the 15-minute window
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Ping the API health check
+        env:
+          API: ${{ vars.FINSIGHT_API_URL }}
+        run: |
+          if [ -z "$API" ]; then
+            echo "::notice::Set the repository variable FINSIGHT_API_URL to your Render API URL to keep it awake."
+            exit 0
+          fi
+          # A sleeping instance can take up to a minute to answer its first request
+          curl --fail --silent --show-error --max-time 90 --retry 2 --retry-delay 10 "${API%/}/api/health"

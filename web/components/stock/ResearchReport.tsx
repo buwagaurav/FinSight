@@ -39,7 +39,7 @@ export default function ResearchReport({ symbol, name }: { symbol: string; name:
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    api<AiStatus>("/api/ai/status").then(setAi).catch(() => {});
+    api<AiStatus>("/api/ai/status", undefined, { cache: 300 }).then(setAi).catch(() => {});
     api<ReportResult | null>(`/api/company/${encodeURIComponent(symbol)}/report`).then(setReport).catch(() => setReport(null));
     return () => { if (timer.current) clearInterval(timer.current); };
   }, [symbol]);

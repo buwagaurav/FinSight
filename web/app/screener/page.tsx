@@ -88,12 +88,12 @@ function Screener() {
   const { user } = useUser();
 
   useEffect(() => {
-    api<Record<string, string>>(`/api/screener/fields?market=${market}`).then(setFields).catch(() => {});
+    api<Record<string, string>>(`/api/screener/fields?market=${market}`, undefined, { cache: 3600 }).then(setFields).catch(() => {});
   }, [market]);
 
   useEffect(() => {
-    api<string[]>("/api/screener/sectors").then(setAllSectors).catch(() => {});
-    api<AiStatus>("/api/ai/status").then(setAi).catch(() => {});
+    api<string[]>("/api/screener/sectors", undefined, { cache: 3600 }).then(setAllSectors).catch(() => {});
+    api<AiStatus>("/api/ai/status", undefined, { cache: 300 }).then(setAi).catch(() => {});
   }, []);
 
   const run = useCallback((f: ScreenFilter[], s: typeof sort, sec: string[] = [], m: Market = market) => {

@@ -182,7 +182,34 @@ async function apiToken(): Promise<string | null> {
   return body.token;
 }
 
-export async function api<T>(path: string, init?: RequestInit, opts?: { auth?: boolean }): Promise<T> {
+/** Recent GET responses kept for `cache` seconds: switching back to a tab or page reuses them instead of asking the
+ * API again, and identical requests made at the same moment share one network call. Responses are shared, so
+ * callers must not modify them. Failures aren't remembered. */
+const memo = new Map<string, { at: number; seconds: number; value: Promise<unknown> }>();
+
+export async function api<T>(path: string, init?: RequestInit, opts?: { auth?: boolean; cache?: number }): Promise<T> {
+  if (opts?.cache && !opts.auth && (!init?.method || init.method === "GET")) {
+    const hit = memo.get(path);
+    if (hit && Date.now() - hit.at < hit.seconds * 1000) return hit.value as Promise<T>;
+    const value = request<T>(path, init, opts);
+    memo.set(path, { at: Date.now(), seconds: opts.cache, value });
+    value.catch(() => memo.delete(path));
+    return value;
+  }
+  return request<T>(path, init, opts);
+}
+
+/** Load a GET response into the cache in the background, so the tab or page that needs it opens instantly. */
+export function prefetch(path: string, seconds: number) {
+  api(path, undefined, { cache: seconds }).catch(() => {});
+}
+
+/** Drop a cached response that a change has made out of date. */
+export function forget(path: string) {
+  memo.delete(path);
+}
+
+async function request<T>(path: string, init?: RequestInit, opts?: { auth?: boolean }): Promise<T> {
   const token = opts?.auth ? await apiToken() : null;
   const res = await fetch(API_BASE + path, {
     ...init,

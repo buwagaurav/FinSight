@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Badge, Card, Skeleton } from "@/components/ui";
-import { AiStatus, Announcement, api, SummaryResult } from "@/lib/api";
+import { AiStatus, Announcement, api, forget, SummaryResult } from "@/lib/api";
 import { date, currencyOf } from "@/lib/format";
 import SignInPrompt from "@/components/SignInPrompt";
 import { useUser } from "@/components/UserContext";
@@ -51,6 +51,9 @@ function Summary({ r }: { r: SummaryResult }) {
   );
 }
 
+export const CACHE_SECONDS = 300;
+export const filingsPath = (symbol: string) => `/api/company/${encodeURIComponent(symbol)}/announcements`;
+
 export default function Filings({ symbol }: { symbol: string }) {
   const { user } = useUser();
   const [items, setItems] = useState<Announcement[] | null>(null);
@@ -61,8 +64,8 @@ export default function Filings({ symbol }: { symbol: string }) {
   const [failed, setFailed] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    api<Announcement[]>(`/api/company/${encodeURIComponent(symbol)}/announcements`).then(setItems).catch((e: Error) => setError(e.message));
-    api<AiStatus>("/api/ai/status").then(setAi).catch(() => {});
+    api<Announcement[]>(filingsPath(symbol), undefined, { cache: CACHE_SECONDS }).then(setItems).catch((e: Error) => setError(e.message));
+    api<AiStatus>("/api/ai/status", undefined, { cache: 300 }).then(setAi).catch(() => {});
   }, [symbol]);
 
   async function summarise(a: Announcement) {
@@ -71,6 +74,7 @@ export default function Filings({ symbol }: { symbol: string }) {
     try {
       const r = await api<SummaryResult>(`/api/company/${encodeURIComponent(symbol)}/announcements/${a.id}/summary`, { method: "POST" }, { auth: true });
       setItems((list) => list?.map((x) => (x.id === a.id ? { ...x, summary: r } : x)) ?? null);
+      forget(filingsPath(symbol));   // the cached list doesn't have this summary yet
     } catch (e) {
       setFailed((f) => ({ ...f, [a.id]: (e as Error).message }));
     } finally {

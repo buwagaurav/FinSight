@@ -144,7 +144,7 @@ export default function AskPanel({ symbol, name, suggestions = COMPANY_SUGGESTIO
   const abortRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => { api<AiStatus>("/api/ai/status").then(setStatus).catch(() => setStatus(null)); }, []);
+  useEffect(() => { api<AiStatus>("/api/ai/status", undefined, { cache: 300 }).then(setStatus).catch(() => setStatus(null)); }, []);
   useEffect(() => { if (!persistent) { setTurns([]); setContext(null); } }, [symbol, persistent]);
   // While waiting, keep the "researching" row in view; when an answer arrives, show it from its first line
   // (the question above it at the top) instead of jumping to the end of a long answer.

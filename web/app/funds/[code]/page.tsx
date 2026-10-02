@@ -15,7 +15,7 @@ export default function FundPage() {
   useEffect(() => {
     setData(null);
     setError(null);
-    api<FundDetail>(`/api/funds/${encodeURIComponent(code)}`).then(setData).catch((e: Error) => setError(e.message));
+    api<FundDetail>(`/api/funds/${encodeURIComponent(code)}`, undefined, { cache: 300 }).then(setData).catch((e: Error) => setError(e.message));
   }, [code]);
 
   if (error) {

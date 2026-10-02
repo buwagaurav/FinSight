@@ -95,3 +95,11 @@ def test_ai_requests_beyond_the_cap_are_told_to_retry_and_not_charged(client, mo
     t.join()
     assert first["r"].status_code == 200
     assert client.get("/api/me", headers=me).json()["ai_usage"]["used"] == 1   # the busy one wasn't charged
+
+
+def test_large_responses_are_compressed(client, monkeypatch):
+    monkeypatch.setattr(main.ipos, "current", lambda: [{"symbol": f"IG-{i}", "nse_symbol": None, "price_high": 100.0,
+                                                       "name": "Example Industries Limited " * 3} for i in range(60)])
+    monkeypatch.setattr(main.gmp, "sync", lambda rows: None)
+    r = client.get("/api/ipos", headers={"Accept-Encoding": "gzip"})
+    assert r.status_code == 200 and r.headers.get("content-encoding") == "gzip"
