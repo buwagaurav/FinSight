@@ -12,8 +12,9 @@ import Logo from "./Logo";
 const LINKS: { href: string; label: string; short?: string }[] = [
   { href: "/home", label: "Home" },
   { href: "/screener", label: "Screener" },
-  { href: "/ipo", label: "IPOs & GMP" },
-  { href: "/sip", label: "SIP calculator", short: "SIP" },   // short label where the bar is tight (768-1023px)
+  { href: "/ipo", label: "IPOs & GMP", short: "IPOs" },
+  { href: "/sip", label: "SIP calculator", short: "SIP" },   // short labels where the bar is tight (768-1023px)
+  { href: "/funds", label: "Mutual funds", short: "Funds" },
 ];
 
 export default function Nav() {

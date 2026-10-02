@@ -17,6 +17,11 @@ const BY_PAGE: Record<string, string[]> = {
     "What is the price band, lot size and issue size of the open mainboard IPOs?",
     "What is the latest GMP for the open IPOs, and why is it unofficial?",
   ],
+  "/funds": [
+    "What is the difference between Direct and Regular plans?",
+    "What is an expense ratio and why does it matter?",
+    "What is the difference between Growth and IDCW options?",
+  ],
   "/sip": [
     "What is a SIP and how does it work?",
     "What is rupee cost averaging?",
@@ -71,7 +76,7 @@ export default function ChatWidget() {
           className="fixed z-40 left-[max(1rem,env(safe-area-inset-left))] right-[max(1rem,env(safe-area-inset-right))] sm:left-auto sm:w-[440px] bottom-[calc(5rem+env(safe-area-inset-bottom,0px))] max-h-[min(680px,calc(100dvh-7rem-env(safe-area-inset-top,0px)))] overflow-y-auto overscroll-contain rounded-xl shadow-2xl">
           <AskPanel symbol={symbol ? decodeURIComponent(symbol) : undefined}
             name={ticker ?? "stocks, IPOs & finance"}
-            suggestions={symbol ? COMPANY : BY_PAGE[path] ?? GENERAL}
+            suggestions={symbol ? COMPANY : BY_PAGE[`/${path.split("/")[1]}`] ?? GENERAL}   /* /funds/123 uses /funds's */
             persistent />
         </div>
       )}

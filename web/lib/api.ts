@@ -294,3 +294,19 @@ export type WatchDetails = {
   filing?: { category: string; text: string; published: string | null; url: string | null; new?: boolean };
   score_error?: string; filing_error?: string;
 };
+
+// ---------------------------------------------------------------- mutual funds (AMFI daily NAV)
+
+export type FundScheme = {
+  code: number; name: string; fund: string; house: string | null; type: string | null; group: string; category: string;
+  plan: "Direct" | "Regular"; option: "Growth" | "IDCW" | "Other"; option_detail: string | null;
+  nav: number; nav_date: string; isins: string[]; active: boolean;
+};
+export type FundSearch = {
+  total: number; offset: number; rows: FundScheme[]; nav_date: string; source: Source;
+  facets: { groups: Record<string, string[]>; houses: string[] };
+};
+export type FundDetail = {
+  scheme: FundScheme; variants: FundScheme[]; source: Source;
+  direct_vs_regular: { direct: number; regular: number; direct_ahead_pct: number } | null;
+};

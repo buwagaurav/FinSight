@@ -11,7 +11,7 @@ const BASE = process.env.BASE_URL || "http://localhost:3000";
 const VIEWPORTS = (process.env.VIEWPORTS ||
   "320x568,360x800,390x844,430x932,600x960,768x1024,1024x1366,1280x800,1440x900,1920x1080,844x390,1024x768").split(",");
 const PAGES = (process.env.PAGES ||
-  "/,/home,/stock/TCS.NS,/stock/TCS.NS#Fundamentals,/stock/TCS.NS#Valuation,/stock/TCS.NS#Filings & news,/stock/TCS.NS#AI report,/screener,/ipo,/sip,/privacy,/terms").split(",");
+  "/,/home,/stock/TCS.NS,/stock/TCS.NS#Fundamentals,/stock/TCS.NS#Valuation,/stock/TCS.NS#Filings & news,/stock/TCS.NS#AI report,/screener,/ipo,/sip,/funds,/funds/122639,/privacy,/terms").split(",");
 
 const browser = await chromium.launch(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: "chrome" });
 let failures = 0;

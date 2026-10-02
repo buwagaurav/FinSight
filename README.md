@@ -49,6 +49,7 @@ offline and never touch your data. GitHub Actions runs both suites on every push
 | Annual statements | Yahoo Finance | SEC EDGAR XBRL company facts (10-K) |
 | Price, quote, news | Yahoo Finance | Yahoo Finance |
 | Filings | NSE corporate announcements | SEC EDGAR filings (8-K, 10-Q, 10-K, proxy) |
+| Mutual fund NAVs | AMFI daily NAV file (official, ~14,000 schemes, cached 1 hour) | — |
 | Screener refresh | `python -m app.loader` (per company) | `python -m app.us_market`: SEC bulk files weekly, batched prices daily |
 
 SEC EDGAR is free and needs no key; it asks for a User-Agent with a contact email. FinSight sends
@@ -71,7 +72,7 @@ SEC EDGAR is free and needs no key; it asks for a User-Agent with a contact emai
 | `backend/app/ai/report.py` | LangGraph multi-agent report: fundamentals, valuation and filings/news analysts in parallel, then a risk reviewer, writer, and a checker that sends the writer back (up to 2 times) if any figure or citation can't be traced. Runs as a background job; saved per company. |
 | `backend/eval/` | `check_data.py` (FinSight data vs audited NSE XBRL filings, no key needed), `run_eval.py` + 125 questions (assistant faithfulness). See `backend/eval/README.md`. |
 | `backend/research/forecast_backtest.py` | Walk-forward backtest of return forecasters by market regime, with a promotion gate: no forecast is shown to users unless it beats a random walk in every regime and its intervals are calibrated. |
-| `web/` | Next.js + Tailwind + ECharts. Home, `/stock/[symbol]` (Overview · Fundamentals · Valuation · News), `/screener`, `/ipo`, `/sip` (SIP calculator, same method as SEBI's: `lib/sip.ts`). |
+| `web/` | Next.js + Tailwind + ECharts. Home, `/stock/[symbol]` (Overview · Fundamentals · Valuation · News), `/screener`, `/ipo`, `/sip` (SIP and one-time calculator; SIP uses SEBI's method: `lib/sip.ts`), `/funds` (every mutual fund scheme with its latest NAV from AMFI's official daily file: `backend/app/providers/amfi.py`, `backend/app/funds.py`). |
 
 Product rules the code follows:
 - The LLM (when added) explains; code calculates. No model does arithmetic on financials.

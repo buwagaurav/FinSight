@@ -14,7 +14,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
-from app import auth, candles, gmp, ipos, loader, research, screener, watchlist
+from app import auth, candles, funds, gmp, ipos, loader, research, screener, watchlist
 from app.ai import assistant, filings, guardrail, llm, report, screen_nl
 from app.providers import nse, sec, yahoo
 
@@ -165,6 +165,27 @@ def ipo(symbol: str):
     if not match:
         raise HTTPException(404, f"{symbol} is not among the IPOs FinSight tracks")
     return match
+
+
+@app.get("/api/funds")
+def funds_search(q: str = Query("", max_length=100), group: str | None = None, category: str | None = None,
+                 house: str | None = None, plan: Literal["Direct", "Regular"] | None = None,
+                 option: Literal["Growth", "IDCW", "Other"] | None = None, include_inactive: bool = False,
+                 offset: int = Query(0, ge=0), limit: int = Query(funds.PAGE, ge=1, le=200)):
+    try:
+        return funds.search(q, group, category, house, plan, option, include_inactive, offset, limit)
+    except Exception as e:
+        raise HTTPException(502, f"Mutual fund data from AMFI is unavailable right now: {e}")
+
+
+@app.get("/api/funds/{code}")
+def fund_detail(code: int):
+    try:
+        return funds.detail(code)
+    except LookupError:
+        raise HTTPException(404, f"No mutual fund scheme with code {code} in AMFI's list")
+    except Exception as e:
+        raise HTTPException(502, f"Mutual fund data from AMFI is unavailable right now: {e}")
 
 
 class GmpEntry(BaseModel):

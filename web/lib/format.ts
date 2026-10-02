@@ -15,6 +15,13 @@ export function crore(v: number | null | undefined): string {
   return `₹${inr.format(v)} Cr`;
 }
 
+const inr4 = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+
+/** A mutual fund NAV: up to 4 decimals, as AMFI publishes it. */
+export function nav(v: number | null | undefined): string {
+  return v == null ? DASH : "₹" + inr4.format(v);
+}
+
 export function pct(v: number | null | undefined, decimals = 1, signed = false): string {
   if (v == null) return DASH;
   const s = v.toFixed(decimals) + "%";
