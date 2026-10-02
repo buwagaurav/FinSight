@@ -42,10 +42,18 @@ Available fields (all percentages are in percent, e.g. 15 means 15%; market cap 
 Sectors you can filter on: {", ".join(screener.SECTORS)}.
 
 Conventions for vague terms (state each one you use in `interpretations`):
-- high/good ROE or ROCE: > 15. Excellent: > 20.   - low debt: debt_to_equity < 0.5. Debt-free: < 0.1.
-- growing / growth: CAGR > 10. Fast growth: > 15. - cheap / reasonable valuation: pe < 25 (and pe > 0).
-- large cap: market_cap_cr > {"10000 ($10B)" if us else "100000"}. Mid cap: {"2000-10000" if us else "20000-100000"}.  - high dividend: dividend_yield_pct > 2.
+{conventions(market)}
 Never invent fields. Anything you cannot express goes in `unsupported` instead of being approximated silently."""
+
+
+def conventions(market: str = "IN") -> str:
+    """How vague screening words map to filters. Shared with Ask FinSight, so a chat screen and a plain-English
+    screen read "small cap" or "low debt" the same way."""
+    us = market == "US"
+    return f"""- high/good ROE or ROCE: > 15. Excellent: > 20.   - low debt: debt_to_equity < 0.5. Debt-free: < 0.1.
+- growing / growth: CAGR > 10. Fast growth: > 15. - cheap / reasonable valuation: pe < 25 (and pe > 0).
+- profitable: pe > 0 (positive trailing earnings) and roe_pct > 0.   - high dividend: dividend_yield_pct > 2.
+- large cap: market_cap_cr > {"10000 ($10B)" if us else "100000"}. Mid cap: {"2000-10000" if us else "20000-100000"}. Small cap: < {"2000" if us else "20000"}."""
 
 
 SYSTEM = {m: _system(m) for m in screener.MARKETS}

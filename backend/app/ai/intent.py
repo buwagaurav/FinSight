@@ -5,6 +5,8 @@ toolset (company questions keep the core company tools under every intent).
 """
 import re
 
+from app.ai.screen_nl import conventions
+
 INTENTS = ("company_research", "stock_screening", "company_comparison", "valuation", "filing_question",
            "ipo_research", "technical_analysis", "portfolio_risk", "general_finance")
 
@@ -42,9 +44,11 @@ RULES = [
                      r"price band|anchor investor"),
     ("portfolio_risk", r"\bportfolio\b|my (?:holdings|stocks|investments)|\bholdings\b|diversif|concentrat|"
                        r"\ballocation\b|\bweights?\b"),
-    ("stock_screening", r"\bscreen|\bfind (?:me )?(?:stocks|companies|shares)\b|\blist (?:of )?(?:stocks|companies)\b|"
-                        r"\b(?:stocks|companies|shares) (?:with|having|where|that have|trading below|under)\b|"
-                        r"\bwhich (?:stocks|companies|shares)\b|\btop \d+ (?:stocks|companies)\b"),
+    ("stock_screening", r"\bscreen|\b(?:find|show|list|suggest|recommend|give)(?: me)?(?: some| a few| the)? (?:\w+ ){0,3}"
+                        r"(?:stocks|companies|shares|names|picks|ideas|(?:small|mid|large)[- ]?caps)\b|"
+                        r"\b(?:stocks|companies|shares|small[- ]?caps|mid[- ]?caps|large[- ]?caps) (?:with|having|where|that have|"
+                        r"trading below|under|paying)\b|\bwhich (?:\w+ ){0,2}(?:stocks|companies|shares|banks|caps)\b|"
+                        r"\btop \d+ (?:stocks|companies)\b|\b(?:small|mid|large)[- ]?caps\b"),
     ("technical_analysis", r"\btechnical|\bmoving average|\bsma\b|\bema\b|\brsi\b|\bmacd\b|\bmomentum\b|\btrend\b|"
                            r"\bsupport\b|\bresistance\b|\bvolatil|\bdrawdown|\bbeta\b|\bchart\b|52[- ]week|"
                            r"price action|breakout"),
@@ -68,14 +72,16 @@ TOOLS = {
     "ipo_research": ["get_ipo_data", "search_company", "calculate"],
     "technical_analysis": COMPANY + ["get_technicals"],
     "portfolio_risk": ["portfolio_risk", "search_company", "get_company_snapshot", "calculate"],
-    "general_finance": COMPANY,   # in case the question turns out to need a company's data
+    "general_finance": COMPANY + ["run_screen"],   # in case the question turns out to need data
 }
 
 # Extra system-prompt rules per intent, appended to the assistant's base rules.
 GUIDANCE = {
     "company_research": "Cover business quality, growth, profitability, balance sheet and the main risks.",
-    "stock_screening": "Translate the request into run_screen filters, state each filter you applied and how many "
-                       "companies matched. A screen result is a starting list for research, not a recommendation.",
+    "stock_screening": "Run the screen with run_screen: never answer a screening request without running it. State "
+                       "each filter you applied and how many companies matched, and list the top names. A screen "
+                       "result is a starting list for research, not a recommendation. Read vague words this way:\n"
+                       + conventions("IN"),
     "company_comparison": "Compare like with like: same metrics, same fiscal year. If the companies' latest years "
                           "differ, or they report in different currencies, say so before comparing.",
     "valuation": "Give a range from the bear/base/bull scenarios with their assumptions, never a single target "

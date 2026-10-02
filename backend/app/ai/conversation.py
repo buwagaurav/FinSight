@@ -110,8 +110,12 @@ def context_note(state: dict, page_symbol: str | None) -> str:
     return note
 
 
+# Questions about many companies at once: their wording ("low debt", "high ROE") is a filter, not a topic to carry
+NO_TOPIC = {"stock_screening", "ipo_research", "portfolio_risk"}
+
+
 def update(state: dict, question: str, answer: str, page_symbol: str | None, outputs: list[str],
-           sources: list[dict], calls: list[dict]) -> dict:
+           sources: list[dict], calls: list[dict], intent: str = "company_research") -> dict:
     """The state after this answer: topic from the question (falling back to the earlier turn), and the data the
     answer cited, so the next turn can use it."""
     cited = {sid for group in re.findall(r"\[(S\d+(?:\s*,\s*S\d+)*)\]", answer) for sid in re.findall(r"S\d+", group)}
@@ -143,8 +147,9 @@ def update(state: dict, question: str, answer: str, page_symbol: str | None, out
         if isinstance(data, dict) and "operation" in data and "result" in data:
             calculation = {k: data.get(k) for k in ("source", "label", "operation", "inputs", "result")}
 
-    return {"companies": companies[:6], "metric": metric_label(question) or state["metric"],
-            "period": period_label(question) or state["period"], "last_calculation": calculation,
+    topic = intent not in NO_TOPIC
+    return {"companies": companies[:6], "metric": (metric_label(question) if topic else None) or state["metric"],
+            "period": (period_label(question) if topic else None) or state["period"], "last_calculation": calculation,
             "evidence": kept, "sources": carried, "signature": _sign(kept, carried)}
 
 
@@ -164,13 +169,13 @@ FOLLOW_UPS = {
 }
 
 
-def follow_ups(intent: str, state: dict) -> list[str]:
-    """Next questions to offer, worded for what was just discussed."""
+def follow_ups(intent: str, state: dict, concept: bool = False) -> list[str]:
+    """Next questions to offer, worded for what was just discussed. `concept`: the answer explained a term."""
     company = state["companies"][0]["name"] if len(state["companies"]) == 1 else None
-    if intent == "general_finance" and state["metric"]:
+    if concept and state["metric"]:
         m = state["metric"]
         return ([f"What is {company}'s {m}?"] if company else []) + \
-            [f"Which large companies have a strong {m}?", f"How does {m} differ across industries?"]
+            [f"How do I tell whether a company's {m} is good?", f"How does {m} differ across industries?"]
     options = FOLLOW_UPS.get(intent, [])
     if company:
         return [q.format(c=company.split(" Limited")[0]) for q in options][:3]

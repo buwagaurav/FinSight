@@ -49,6 +49,7 @@ Rules:
   the exact words in "double quotes" followed by the citation, e.g. "attrition was 13.3%" [S4].
 - Say plainly when data is missing. Round sensibly (48.72 -> 48.7%). Amounts are ₹ crore for Indian companies
   ("L Cr" = lakh crore) and $ million for US companies (see unit fields); keep each company in its own currency.
+- FinSight has its own screener (run_screen) and data tools: never send the user to other websites or apps.
 - Plain language; briefly define jargon. No buy/sell instructions, price targets or promised returns; for the
   future, describe scenarios and what to monitor. GMP is unofficial: always say so. Mention data_checks warnings
   when relevant.
@@ -121,7 +122,7 @@ def ask(question: str, symbol: str | None = None, history: list[dict] | None = N
         v["passed"] = False
         v["note"] = "Some quotes or calculations could not be confirmed against their sources. Treat them with caution."
     new_state = conversation.update(state, question, run["answer"], symbol, run.get("outputs", preloaded),
-                                    sources.items, run["calls"])
+                                    sources.items, run["calls"], kind)
     return {**result, "intent": kind, "warnings": warnings(run.get("outputs", preloaded), result["sources"], run["calls"]),
             "data_timestamp": max((s["retrieved_at"] for s in result["sources"]), default=None),
             "disclaimer": DISCLAIMER, "usage": run["usage"], "state": new_state,
@@ -140,7 +141,7 @@ def _concept(question: str, messages: list[dict], sources: T.Sources, state: dic
         return {**out_of_scope(state), "model": run["model"], "usage": run["usage"]}
     state = {**state, "metric": conversation.metric_label(question) or state["metric"]}   # "what is it for TCS?"
     return {"answer": run["answer"], "sources": [], "tool_calls": [], "intent": "general_finance", "warnings": [],
-            "state": state, "follow_ups": conversation.follow_ups("general_finance", state),
+            "state": state, "follow_ups": conversation.follow_ups("general_finance", state, concept=True),
             "verification": {"passed": True, "applicable": False, "unverified": [], "misattributed": [],
                              "note": "A general explanation: no company data was used, so there are no figures to check."},
             "data_timestamp": None, "disclaimer": DISCLAIMER, "model": run["model"], "usage": run["usage"]}

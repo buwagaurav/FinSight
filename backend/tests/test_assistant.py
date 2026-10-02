@@ -319,3 +319,23 @@ def test_chat_answers_ask_deepseek_for_low_reasoning_effort(monkeypatch):
     monkeypatch.setenv("MOONSHOT_API_KEY", "test")
     assert llm.effort("assistant") is None                # only sent to providers known to accept it
     assert "DeepSeek is responding slowly" in llm.timeout_message("deepseek")
+
+
+@pytest.mark.parametrize("question", ["Find profitable small caps with low debt", "Show me some mid caps with high ROE",
+                                      "Suggest a few dividend stocks", "Which banks trade below 2x book value?"])
+def test_screening_requests_get_the_screener(question):
+    assert intent.classify(question) == "stock_screening"
+    assert "run_screen" in intent.tools_for("stock_screening")
+    assert "Small cap: < 20000" in intent.GUIDANCE["stock_screening"]   # same reading as the plain-English screener
+
+
+def test_screens_dont_become_the_topic_and_get_screen_follow_ups():
+    from app.ai import conversation
+    state = conversation.update(conversation.empty(), "Find profitable small caps with low debt", "Found 40 [S1]",
+                                None, [], [], [], "stock_screening")
+    assert state["metric"] is None
+    assert conversation.follow_ups("stock_screening", state) == ["Compare the top 3 results",
+                                                                 "Which of these has the lowest debt?"]
+    concept = {**conversation.empty(), "metric": "ROE"}
+    assert conversation.follow_ups("general_finance", concept) == []                 # not a concept answer
+    assert "How does ROE differ across industries?" in conversation.follow_ups("general_finance", concept, concept=True)
