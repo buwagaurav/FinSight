@@ -71,7 +71,7 @@ SEC EDGAR is free and needs no key; it asks for a User-Agent with a contact emai
 | `backend/app/ai/report.py` | LangGraph multi-agent report: fundamentals, valuation and filings/news analysts in parallel, then a risk reviewer, writer, and a checker that sends the writer back (up to 2 times) if any figure or citation can't be traced. Runs as a background job; saved per company. |
 | `backend/eval/` | `check_data.py` (FinSight data vs audited NSE XBRL filings, no key needed), `run_eval.py` + 125 questions (assistant faithfulness). See `backend/eval/README.md`. |
 | `backend/research/forecast_backtest.py` | Walk-forward backtest of return forecasters by market regime, with a promotion gate: no forecast is shown to users unless it beats a random walk in every regime and its intervals are calibrated. |
-| `web/` | Next.js + Tailwind + ECharts. Home, `/stock/[symbol]` (Overview · Fundamentals · Valuation · News), `/screener`, `/ipo`. |
+| `web/` | Next.js + Tailwind + ECharts. Home, `/stock/[symbol]` (Overview · Fundamentals · Valuation · News), `/screener`, `/ipo`, `/sip` (SIP calculator, same method as SEBI's: `lib/sip.ts`). |
 
 Product rules the code follows:
 - The LLM (when added) explains; code calculates. No model does arithmetic on financials.

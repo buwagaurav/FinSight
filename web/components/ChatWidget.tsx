@@ -17,6 +17,11 @@ const BY_PAGE: Record<string, string[]> = {
     "What is the price band, lot size and issue size of the open mainboard IPOs?",
     "What is the latest GMP for the open IPOs, and why is it unofficial?",
   ],
+  "/sip": [
+    "What is a SIP and how does it work?",
+    "What is rupee cost averaging?",
+    "How is capital gains tax applied to mutual fund SIPs?",
+  ],
   "/screener": [
     "Find profitable small caps with low debt",
     "Which banks trade below 2x book value?",

@@ -9,10 +9,11 @@ import { signOutAction } from "@/app/actions";
 import GoogleButton from "./GoogleButton";
 import Logo from "./Logo";
 
-const LINKS = [
+const LINKS: { href: string; label: string; short?: string }[] = [
   { href: "/home", label: "Home" },
   { href: "/screener", label: "Screener" },
   { href: "/ipo", label: "IPOs & GMP" },
+  { href: "/sip", label: "SIP calculator", short: "SIP" },   // short label where the bar is tight (768-1023px)
 ];
 
 export default function Nav() {
@@ -36,20 +37,20 @@ export default function Nav() {
           <Logo />
         </Link>
         {!landing && (
-          <nav aria-label="Main" className="hidden md:flex items-center gap-1 text-sm min-w-0">
+          <nav aria-label="Main" className="hidden md:flex items-center gap-1 text-sm shrink-0">
             {LINKS.map((l) => {
               const active = path.startsWith(l.href);
               return (
                 <Link key={l.href} href={l.href}
                   aria-current={active ? "page" : undefined}
                   className={`px-2.5 py-1.5 rounded-lg whitespace-nowrap ${active ? "bg-surface-2 text-ink font-medium" : "text-ink-2 hover:text-ink"}`}>
-                  {l.label}
+                  {l.short ? <><span className="lg:hidden">{l.short}</span><span className="hidden lg:inline">{l.label}</span></> : l.label}
                 </Link>
               );
             })}
           </nav>
         )}
-        {!landing && <div className="ml-auto w-full max-w-xs hidden md:block"><SearchBox /></div>}
+        {!landing && <div className="ml-auto flex-1 min-w-[140px] max-w-xs hidden md:block"><SearchBox /></div>}
         {!landing && (
           <div className="md:hidden ml-auto flex items-center">
             <button type="button" className={iconBtn} aria-label="Search stocks" aria-expanded={panel === "search"}
