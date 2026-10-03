@@ -46,7 +46,7 @@ function GmpPanel({ ipo, onAdded }: { ipo: Ipo; onAdded: (e: GmpEntry) => void }
       const entry = await api<GmpEntry>(`/api/ipos/${ipo.symbol}/gmp`, {
         method: "POST",
         body: JSON.stringify({ gmp: Number(form.gmp), source: form.source, source_url: form.source_url || null }),
-      });
+      }, { auth: true });   // adding GMP needs a signed-in user
       onAdded(entry);
       setForm({ gmp: "", source: "", source_url: "" });
     } catch (e) {

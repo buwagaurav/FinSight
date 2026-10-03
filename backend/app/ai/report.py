@@ -11,6 +11,7 @@ checker verifies the final report against every tool output from the whole run.
 """
 import operator
 import re
+import sys
 import threading
 import time
 import uuid
@@ -239,7 +240,12 @@ def start_job(symbol: str, company: str) -> str:
                        (symbol, db.jsonb(result)))
             job.update(status="done", result=result)
         except Exception as e:  # surfaced to the page, which shows it instead of spinning forever
-            job.update(status="error", error=str(e))
+            from app import security
+            from app.ai import llm
+            # our own AI messages ("DeepSeek is responding slowly...") are safe to show; anything else stays in the log
+            ours = isinstance(e, (llm.AIUnavailable, llm.AIRefused))
+            print(f"[report] {symbol}: {type(e).__name__}: {security.redact(str(e))[:300]}", file=sys.stderr)
+            job.update(status="error", error=str(e) if ours else "The report couldn't be finished. Please try again.")
 
     threading.Thread(target=run, daemon=True).start()
     return job_id

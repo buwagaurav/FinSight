@@ -74,3 +74,13 @@ If you rename the Netlify site, redeploy and update both Google URLs and `FINSIG
   requests from hosting providers. If so, those sections show an error on the deployed site but work locally.
 - **Long AI jobs:** a research report runs in the API's memory; if the free instance goes to sleep mid-report, start it again.
 - **Secrets** live only in the Render, Netlify and GitHub settings, never in the repo.
+
+## Security notes
+- **Rate limits** (per visitor IP, in the API): 240 requests a minute overall, 60 stock searches a minute, 10 AI requests
+  a minute, 10 GMP entries an hour. Visitors over a limit get HTTP 429 with a `Retry-After` header. On Render the
+  visitor's address comes from Cloudflare's `True-Client-IP` header (set automatically; nothing to configure).
+- **Diagnostics** `/api/health/sources` and `/api/health/storage` return 404 unless the request carries
+  `X-Admin-Token: <FINSIGHT_ADMIN_TOKEN>`. Set `FINSIGHT_ADMIN_TOKEN` on Render (e.g. `openssl rand -hex 32`) only if you
+  want to use them.
+- **Errors and logs**: visitors only ever see plain messages; everything the API prints or logs has API keys,
+  `DATABASE_URL`, connection strings and database host/user details removed (`backend/app/security.py`).

@@ -26,5 +26,7 @@ services:
         sync: false
       - key: FINSIGHT_API_JWT_SECRET # same value as on Netlify; turns on "sign in to use AI"
         sync: false
+      - key: FINSIGHT_ADMIN_TOKEN  # optional: unlocks /api/health/sources and /storage (X-Admin-Token header)
+        sync: false
       - key: FINSIGHT_AI_DAILY_LIMIT # AI allowance per user per day (a report uses 10)
         value: "30"

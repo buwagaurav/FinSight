@@ -1,5 +1,8 @@
+import hmac
 import json
 import os
+import re
+import sys
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -10,12 +13,12 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")  # before app.ai reads its settings
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field, field_validator
 
-from app import auth, candles, funds, gmp, ipos, loader, research, screener, watchlist
+from app import auth, candles, funds, gmp, ipos, loader, research, screener, security, watchlist
 from app.ai import assistant, filings, guardrail, llm, report, screen_nl
 from app.providers import nse, sec, yahoo
 
@@ -35,6 +38,10 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="FinSight API", version="0.1.0", lifespan=lifespan)
 # Websites allowed to call this API: comma-separated FINSIGHT_CORS_ORIGINS, e.g. "https://finsight.netlify.app".
 # FINSIGHT_CORS_ORIGIN_REGEX can also allow Netlify deploy previews, e.g. "https://.*--finsight\.netlify\.app".
+security.protect_output()   # API keys, DATABASE_URL and DB host details never reach the logs
+app.add_exception_handler(Exception, security.unhandled_error)
+# Added before CORS so it runs inside it: a 429 still carries CORS headers and the page can show the message
+app.add_middleware(security.RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", *filter(None, os.environ.get("FINSIGHT_CORS_ORIGINS", "").split(","))],
@@ -46,12 +53,29 @@ app.add_middleware(
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
+def upstream_error(message: str, exc: Exception) -> HTTPException:
+    """A data source failed: the visitor gets `message`; the server log gets the (redacted) reason."""
+    print(f"[upstream] {message} {type(exc).__name__}: {security.redact(str(exc))[:300]}", file=sys.stderr)
+    return HTTPException(502, message)
+
+
 @app.get("/api/health")
 def health():
     return {"ok": True}
 
 
-@app.get("/api/health/sources")
+def require_admin(x_admin_token: str | None = Header(default=None)):
+    """Diagnostics that describe the server's internals. Allowed with the FINSIGHT_ADMIN_TOKEN header, or freely in
+    local development (no sign-in configured); otherwise they don't exist (404)."""
+    token = os.environ.get("FINSIGHT_ADMIN_TOKEN")
+    if token and x_admin_token and hmac.compare_digest(token, x_admin_token):
+        return
+    if not token and not auth.enabled():
+        return
+    raise HTTPException(404, "Not Found")
+
+
+@app.get("/api/health/sources", dependencies=[Depends(require_admin)])
 def health_sources():
     """Which external data sources this server can reach (cloud hosts are sometimes blocked)."""
     import time as _t
@@ -63,7 +87,7 @@ def health_sources():
             fn()
             return {"ok": True, "ms": round((_t.time() - started) * 1000)}
         except Exception as e:
-            return {"ok": False, "error": str(e)[:200]}
+            return {"ok": False, "error": security.redact(f"{type(e).__name__}: {e}")[:200]}
 
     return {
         "yahoo_quote": check(lambda: yahoo.profile.__wrapped__("RELIANCE.NS")),
@@ -102,7 +126,7 @@ def company_candles(symbol: str, range: Literal[tuple(candles.RANGES)] = "1d"): 
         raise HTTPException(404, f"No price data for {symbol}")
 
 
-@app.get("/api/health/storage")
+@app.get("/api/health/storage", dependencies=[Depends(require_admin)])
 def health_storage():
     """How much of the database is used, and by what (sizes only; no data)."""
     from app import db
@@ -126,7 +150,7 @@ def company_announcements(symbol: str, limit: int = Query(30, le=100)):
     except LookupError:
         raise HTTPException(404, f"No listed company found for {symbol}")
     except Exception as e:
-        raise HTTPException(502, f"{'SEC filings' if us else 'NSE announcements'} unavailable: {e}")
+        raise upstream_error(f"{'SEC' if us else 'NSE'} filings are unavailable right now. Please try again later.", e)
     return [{**a, "summary": filings.cached(a["id"])} for a in rows]
 
 
@@ -153,7 +177,7 @@ def ipos_list():
     try:
         rows = ipos.current()
     except Exception as e:
-        raise HTTPException(502, f"IPO data unavailable: {e}")
+        raise upstream_error("IPO data is unavailable right now. Please try again later.", e)
     gmp.sync(rows)
     gmps = gmp.summaries(rows)
     for r in rows:
@@ -178,7 +202,7 @@ def funds_search(q: str = Query("", max_length=100), group: str | None = None, c
     try:
         return funds.search(q, group, category, house, plan, option, include_inactive, offset, limit)
     except Exception as e:
-        raise HTTPException(502, f"Mutual fund data from AMFI is unavailable right now: {e}")
+        raise upstream_error("Mutual fund data from AMFI is unavailable right now. Please try again later.", e)
 
 
 @app.get("/api/funds/{code}")
@@ -188,19 +212,32 @@ def fund_detail(code: int):
     except LookupError:
         raise HTTPException(404, f"No mutual fund scheme with code {code} in AMFI's list")
     except Exception as e:
-        raise HTTPException(502, f"Mutual fund data from AMFI is unavailable right now: {e}")
+        raise upstream_error("Mutual fund data from AMFI is unavailable right now. Please try again later.", e)
 
 
 class GmpEntry(BaseModel):
-    gmp: float = Field(description="Grey-market premium in ₹ per share")
-    source: str = Field(min_length=2)
-    source_url: str | None = None
-    observed_at: str | None = None
+    gmp: float = Field(ge=-100000, le=100000, description="Grey-market premium in ₹ per share")
+    source: str = Field(min_length=2, max_length=80)
+    source_url: str | None = Field(default=None, max_length=500)
+    observed_at: str | None = Field(default=None, max_length=40)
+
+    @field_validator("source_url")
+    @classmethod
+    def _http_only(cls, v):
+        # shown as a link on the IPO page: anything but http(s) (e.g. javascript:) could run code in a reader's browser
+        if v and not re.match(r"^https?://[^\s]+$", v, re.IGNORECASE):
+            raise ValueError("source_url must be an http(s) link")
+        return v or None
 
 
 @app.post("/api/ipos/{symbol}/gmp")
-def add_gmp(symbol: str, entry: GmpEntry):
-    return gmp.add(symbol, entry.gmp, entry.source, entry.source_url, entry.observed_at)
+def add_gmp(symbol: str, entry: GmpEntry, user: dict = Depends(auth.require_user)):   # no anonymous writes
+    if not re.match(r"^[A-Za-z0-9&.\-]{1,40}$", symbol):
+        raise HTTPException(422, "Invalid IPO symbol")
+    try:
+        return gmp.add(symbol, entry.gmp, entry.source, entry.source_url, entry.observed_at)
+    except ValueError:
+        raise HTTPException(422, "observed_at must be an ISO date and time, e.g. 2026-10-01T18:30:00+05:30")
 
 
 class Filter(BaseModel):

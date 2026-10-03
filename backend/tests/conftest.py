@@ -64,3 +64,11 @@ def add_company(db, symbol: str, name: str, sector: str = "Technology", **metric
                 row["roe_pct"], row.get("roce_pct"), row.get("debt_to_equity"), row.get("profit_cagr_pct")))
     db.execute("INSERT INTO profiles (symbol, data) VALUES (%s, %s)",
                (symbol, db.jsonb({"change_pct": 1.5, "week52_low": 80.0, "week52_high": 120.0})))
+
+
+@pytest.fixture(autouse=True)
+def _fresh_rate_limits():
+    """Each test starts with empty rate-limit counters (they're per process, and the suite makes many requests)."""
+    from app import security
+    security.limiter.reset()
+    yield
