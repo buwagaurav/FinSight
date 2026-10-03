@@ -84,3 +84,8 @@ If you rename the Netlify site, redeploy and update both Google URLs and `FINSIG
   want to use them.
 - **Errors and logs**: visitors only ever see plain messages; everything the API prints or logs has API keys,
   `DATABASE_URL`, connection strings and database host/user details removed (`backend/app/security.py`).
+- **Hardening**: remote databases are always reached over TLS (`sslmode=require` is enforced); the API's `/docs` and
+  `/openapi.json` are off in production; request bodies over 512 KB are refused; symbols in URLs must look like
+  symbols; API and website responses carry security headers (the website's Content-Security-Policy limits scripts,
+  connections, frames and form posts to the site, the API and Google sign-in). Dependency scans: `npm audit` in
+  `web/`, and `pip-audit` for `backend/requirements.txt`.

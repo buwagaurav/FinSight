@@ -139,3 +139,40 @@ def test_limiter_window_slides():
     assert all(lim.hit(("k",), 2, 10, now=t) is None for t in (0, 1))
     assert lim.hit(("k",), 2, 10, now=2) == pytest.approx(8)
     assert lim.hit(("k",), 2, 10, now=10.5) is None                    # the first hit has left the window
+
+
+# ---------------------------------------------------------------- hardening
+
+def test_oversized_requests_and_odd_symbols_are_refused(client):
+    me = {"authorization": token()}
+    big = client.post("/api/ask", content=b"x" * (security.MAX_BODY_BYTES + 1),
+                      headers={**me, "content-type": "application/json"})
+    assert big.status_code == 413
+    for bad in ("TCS%20OR%201=1", "TCS;rm", "A" * 41, "<script>"):
+        assert client.get(f"/api/company/{bad}").status_code == 422, bad
+
+
+def test_api_responses_carry_security_headers(client):
+    r = client.get("/api/health")
+    assert r.headers["x-content-type-options"] == "nosniff" and r.headers["x-frame-options"] == "DENY"
+    assert r.headers["cache-control"] == "no-store"
+
+
+def test_api_docs_are_off_in_production(monkeypatch):
+    import importlib
+    monkeypatch.setenv("RENDER", "true")
+    prod = importlib.reload(main)
+    try:
+        c = TestClient(prod.app)
+        assert c.get("/docs").status_code == 404 and c.get("/openapi.json").status_code == 404
+    finally:
+        monkeypatch.delenv("RENDER")
+        importlib.reload(main)
+
+
+def test_remote_databases_always_use_tls():
+    from app.db import require_tls
+    assert "sslmode=require" in require_tls("postgresql://u:p@ep-x.neon.tech/db")
+    assert "sslmode=require" in require_tls("postgresql://u:p@ep-x.neon.tech/db?sslmode=disable")
+    assert "sslmode=verify-full" in require_tls("postgresql://u:p@ep-x.neon.tech/db?sslmode=verify-full")
+    assert require_tls("postgresql://u:p@localhost/db") == "postgresql://u:p@localhost/db"

@@ -6,7 +6,7 @@ import { Card, LabelBadge, Skeleton } from "./ui";
 import { useUser } from "./UserContext";
 import { useWatchlist } from "./WatchlistContext";
 import { api, WatchDetails, Watchlist } from "@/lib/api";
-import { Currency, currencyOf, date, money, pct } from "@/lib/format";
+import { Currency, currencyOf, date, money, pct, safeUrl } from "@/lib/format";
 
 const RANK: Record<string, number> = { Weak: 0, Watchlist: 1, Stable: 2, Improving: 3, Strong: 4 };
 
@@ -170,7 +170,7 @@ export default function WatchlistPanel() {
                             <span className="text-muted">{date(d.filing.published)}</span>
                           </div>
                           {d.filing.url
-                            ? <a href={d.filing.url} target="_blank" rel="noreferrer" className="mt-0.5 line-clamp-2 text-xs text-ink-2 hover:text-accent">{d.filing.category}: {d.filing.text}</a>
+                            ? <a href={safeUrl(d.filing.url)} target="_blank" rel="noreferrer" className="mt-0.5 line-clamp-2 text-xs text-ink-2 hover:text-accent">{d.filing.category}: {d.filing.text}</a>
                             : <p className="mt-0.5 line-clamp-2 text-xs text-ink-2">{d.filing.category}: {d.filing.text}</p>}
                         </div>
                       ) : <span className="text-xs text-muted">{d.filing_error ?? "No recent filings"}</span>}

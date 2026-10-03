@@ -103,10 +103,24 @@ _server = None
 _lock = threading.Lock()
 
 
+def require_tls(url: str) -> str:
+    """A database on another machine is always reached over TLS, whatever the URL says: credentials and data never
+    cross the network unencrypted. Local databases (localhost, a Unix socket) are left alone."""
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    if not host or host in ("localhost", "127.0.0.1", "::1"):
+        return url
+    query = dict(parse_qsl(parts.query))
+    if query.get("sslmode") not in ("require", "verify-ca", "verify-full"):
+        query["sslmode"] = "require"
+    return urlunsplit(parts._replace(query=urlencode(query)))
+
+
 def _uri() -> str:
     global _server
     if url := os.environ.get("DATABASE_URL"):
-        return url
+        return require_tls(url)
     import pgserver  # embedded PostgreSQL, only needed when no external database is configured
     DATA_DIR.parent.mkdir(parents=True, exist_ok=True)
     _server = pgserver.get_server(DATA_DIR, cleanup_mode="stop")

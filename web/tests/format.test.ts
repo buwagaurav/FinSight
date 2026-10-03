@@ -56,3 +56,15 @@ describe("US listings", () => {
     expect(amount(null, "USD")).toBe(DASH);
   });
 });
+
+import { safeUrl } from "@/lib/format";
+
+describe("safeUrl", () => {
+  it("keeps http(s) links and drops anything that could run code", () => {
+    expect(safeUrl("https://www.nseindia.com/x.pdf")).toBe("https://www.nseindia.com/x.pdf");
+    expect(safeUrl(" http://example.com ")).toBe("http://example.com");
+    for (const bad of ["javascript:alert(1)", " JavaScript:alert(1)", "data:text/html,<script>", "//evil.com", "", null, undefined]) {
+      expect(safeUrl(bad)).toBeUndefined();
+    }
+  });
+});

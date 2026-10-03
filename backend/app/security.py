@@ -145,3 +145,32 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 return JSONResponse({"detail": "Too many requests. Please wait a moment and try again."},
                                     status_code=429, headers={"Retry-After": str(max(1, int(wait) + 1))})
         return await call_next(request)
+
+
+# ---------------------------------------------------------------- request size and response headers
+
+MAX_BODY_BYTES = 512 * 1024   # the largest real request (a chat question with its history and state) is ~150 KB
+HEADERS = {
+    "X-Content-Type-Options": "nosniff",       # browsers must not guess a JSON response is HTML or script
+    "X-Frame-Options": "DENY",                 # API responses never belong in a frame
+    "Referrer-Policy": "no-referrer",
+    "Cache-Control": "no-store",               # responses can carry a user's watchlist; never keep them in shared caches
+}
+# Stock symbols as they appear in URLs: NSE (M&M, BAJAJ-AUTO), US (BRK-B.US), with an optional exchange suffix.
+# Anything else is refused before it reaches Yahoo, NSE or SEC requests.
+SYMBOL_IN_PATH = re.compile(r"^/api/(?:company|watchlist|ipos)/([^/]+)")
+SYMBOL = re.compile(r"^[A-Za-z0-9&.\-]{1,40}$")
+
+
+class HardeningMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        length = request.headers.get("content-length")
+        if length and (not length.isdigit() or int(length) > MAX_BODY_BYTES):
+            return JSONResponse({"detail": "Request too large."}, status_code=413)
+        m = SYMBOL_IN_PATH.match(request.url.path)
+        if m and m.group(1) not in ("symbols",) and not SYMBOL.match(m.group(1)):
+            return JSONResponse({"detail": "Invalid symbol."}, status_code=422)
+        response = await call_next(request)
+        for k, v in HEADERS.items():
+            response.headers.setdefault(k, v)
+        return response

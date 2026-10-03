@@ -3,6 +3,12 @@ const inr2 = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumF
 
 export const DASH = "—";
 
+/** A link from outside data (news, filings, user-entered GMP sources), or undefined unless it's plain http(s):
+ * a "javascript:" or "data:" link could run code in the reader's browser. */
+export function safeUrl(url: string | null | undefined): string | undefined {
+  return url && /^https?:\/\//i.test(url.trim()) ? url.trim() : undefined;
+}
+
 export function rupees(v: number | null | undefined, decimals = 2): string {
   if (v == null) return DASH;
   return "₹" + (decimals ? inr2.format(v) : inr.format(v));

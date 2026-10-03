@@ -35,13 +35,18 @@ async def lifespan(_app: FastAPI):
     stop.set()
 
 
-app = FastAPI(title="FinSight API", version="0.1.0", lifespan=lifespan)
+# The interactive API docs map every route for an attacker; they're for local development only
+_PRODUCTION = bool(os.environ.get("RENDER") or os.environ.get("FINSIGHT_API_JWT_SECRET"))
+app = FastAPI(title="FinSight API", version="0.1.0", lifespan=lifespan,
+              docs_url=None if _PRODUCTION else "/docs", redoc_url=None if _PRODUCTION else "/redoc",
+              openapi_url=None if _PRODUCTION else "/openapi.json")
 # Websites allowed to call this API: comma-separated FINSIGHT_CORS_ORIGINS, e.g. "https://finsight.netlify.app".
 # FINSIGHT_CORS_ORIGIN_REGEX can also allow Netlify deploy previews, e.g. "https://.*--finsight\.netlify\.app".
 security.protect_output()   # API keys, DATABASE_URL and DB host details never reach the logs
 app.add_exception_handler(Exception, security.unhandled_error)
-# Added before CORS so it runs inside it: a 429 still carries CORS headers and the page can show the message
+# Added before CORS so they run inside it: a 429 or 413 still carries CORS headers and the page can show it
 app.add_middleware(security.RateLimitMiddleware)
+app.add_middleware(security.HardeningMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", *filter(None, os.environ.get("FINSIGHT_CORS_ORIGINS", "").split(","))],

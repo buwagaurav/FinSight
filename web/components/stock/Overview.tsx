@@ -5,7 +5,7 @@ import CandleChart, { CANDLE_RANGES, CandleRange } from "@/components/stock/Cand
 import Chart, { baseOption } from "@/components/Chart";
 import { Card, InfoTip, LabelBadge, SourceLink, Stat } from "@/components/ui";
 import { Company } from "@/lib/api";
-import { money, pct } from "@/lib/format";
+import { money, pct, safeUrl } from "@/lib/format";
 import { useCurrency } from "@/components/CurrencyContext";
 
 const RANGES = [{ label: "1Y", days: 365 }, { label: "3Y", days: 3 * 365 }, { label: "5Y", days: 5 * 365 }];
@@ -84,7 +84,7 @@ export default function Overview({ c }: { c: Company }) {
           <div className="flex flex-wrap gap-4 mt-3 text-sm">
             {c.profile.promoter_holding_pct != null && <span className="text-ink-2">Promoter / insider holding: <b className="text-ink">{pct(c.profile.promoter_holding_pct)}</b><InfoTip term="Promoter holding" /></span>}
             {c.profile.institutional_holding_pct != null && <span className="text-ink-2">Institutional holding: <b className="text-ink">{pct(c.profile.institutional_holding_pct)}</b></span>}
-            {c.profile.website && <a href={c.profile.website} target="_blank" rel="noreferrer" className="tap text-accent hover:underline">Company website ↗</a>}
+            {safeUrl(c.profile.website) && <a href={safeUrl(c.profile.website)} target="_blank" rel="noreferrer" className="tap text-accent hover:underline">Company website ↗</a>}
           </div>
         </Card>
       )}

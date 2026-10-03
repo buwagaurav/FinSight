@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import Chart, { baseOption } from "@/components/Chart";
 import { Badge, Card, ErrorBox, InfoTip, Skeleton, SourceLink } from "@/components/ui";
 import { api, GmpEntry, Ipo } from "@/lib/api";
-import { crore, date, pct, rupees } from "@/lib/format";
+import { crore, date, pct, rupees, safeUrl } from "@/lib/format";
 
 const SEGMENTS = ["Mainboard", "SME", "All"] as const;
 const STAGES = [
@@ -70,7 +70,7 @@ function GmpPanel({ ipo, onAdded }: { ipo: Ipo; onAdded: (e: GmpEntry) => void }
             <div className="text-xs text-muted">Latest GMP</div>
             <div className="text-xl font-semibold tabular">{rupees(g.latest.gmp, 0)}</div>
             <div className="text-xs text-muted">
-              {g.latest.source_url ? <a className="underline" href={g.latest.source_url} target="_blank" rel="noreferrer">{g.latest.source}</a> : g.latest.source}
+              {safeUrl(g.latest.source_url) ? <a className="underline" href={safeUrl(g.latest.source_url)} target="_blank" rel="noreferrer">{g.latest.source}</a> : g.latest.source}
               {" · "}{new Date(g.latest.observed_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
             </div>
           </div>

@@ -2,7 +2,7 @@
 
 import { ReactNode, useEffect, useId, useRef, useState } from "react";
 import { GLOSSARY } from "@/lib/glossary";
-import { tone } from "@/lib/format";
+import { safeUrl, tone } from "@/lib/format";
 import { popoverPosition } from "@/lib/position";
 
 export function Card({ title, action, children, className = "" }: { title?: ReactNode; action?: ReactNode; children: ReactNode; className?: string }) {
@@ -95,7 +95,7 @@ export function Stat({ label, value, sub, term }: { label: string; value: ReactN
 export function SourceLink({ name, url, when }: { name: string; url?: string | null; when?: string }) {
   return (
     <span className="text-xs text-muted">
-      Source: {url ? <a href={url} target="_blank" rel="noreferrer" className="underline hover:text-ink">{name}</a> : name}
+      Source: {safeUrl(url) ? <a href={safeUrl(url)} target="_blank" rel="noreferrer" className="underline hover:text-ink">{name}</a> : name}
       {when && <> · {when}</>}
     </span>
   );

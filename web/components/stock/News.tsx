@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Card, Skeleton } from "@/components/ui";
 import { api, NewsItem } from "@/lib/api";
-import { date } from "@/lib/format";
+import { date, safeUrl } from "@/lib/format";
 
 export const newsPath = (symbol: string) => `/api/company/${encodeURIComponent(symbol)}/news`;
 
@@ -23,7 +23,7 @@ export default function News({ symbol }: { symbol: string }) {
       <ul className="divide-y divide-line">
         {items?.map((n) => (
           <li key={n.url} className="py-3">
-            <a href={n.url} target="_blank" rel="noreferrer" className="font-medium text-sm hover:text-accent">{n.title} ↗</a>
+            <a href={safeUrl(n.url)} target="_blank" rel="noreferrer" className="font-medium text-sm hover:text-accent">{n.title} ↗</a>
             {n.summary && <p className="text-sm text-ink-2 mt-1 line-clamp-2">{n.summary}</p>}
             <div className="text-xs text-muted mt-1">{n.publisher ?? "Unknown source"} · {date(n.published)}</div>
           </li>
