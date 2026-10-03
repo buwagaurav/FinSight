@@ -108,7 +108,10 @@ def ask(question: str, symbol: str | None = None, history: list[dict] | None = N
     messages.append({"role": "user", "content": content})
     system = f"{SCOPE}\n\n{SYSTEM}\nThis is a {kind.replace('_', ' ')} question. {I.GUIDANCE[kind]}"
     try:
-        run = llm.run_agent(system, messages, I.tools_for(kind, focus), sources, question, task="assistant",
+        names = I.tools_for(kind, focus)
+        if focus and focus.upper().endswith(".US"):
+            names = [n for n in names if n != "search_documents"]   # NSE annual reports and filings only
+        run = llm.run_agent(system, messages, names, sources, question, task="assistant",
                             preloaded=preloaded, max_rounds=TOOL_ROUNDS, budget=BUDGET_SECONDS)
     except llm.AIRefused:
         run = {"answer": "I can't help with that request. Try asking about a company's financials, valuation or news.",

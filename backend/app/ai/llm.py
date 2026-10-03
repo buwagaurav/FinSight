@@ -187,6 +187,51 @@ class AnthropicAdapter:
         return r.parsed_output
 
 
+# DeepSeek models sometimes write their tool calls into the reply text in their own markup instead of the API's
+# tool_calls field, e.g.
+#   <｜｜DSML｜｜ calls> <｜｜DSML｜｜ invoke name="search_documents">
+#     <｜｜DSML｜｜ parameter name="query" string="true">attrition</｜｜DSML｜｜ parameter> ... </｜｜DSML｜｜ invoke> ...
+# Read as an answer, that markup was shown to the user. It's parsed into real tool calls instead.
+_BAR = r"[｜|]+"
+_TAG = rf"<\s*/?\s*{_BAR}\s*DSML\s*{_BAR}\s*"
+_INVOKE = re.compile(rf"<\s*{_BAR}\s*DSML\s*{_BAR}\s*invoke\s+name=\"([^\"]+)\"\s*>(.*?)<\s*/\s*{_BAR}\s*DSML\s*{_BAR}\s*invoke\s*>", re.S)
+_PARAM = re.compile(rf"<\s*{_BAR}\s*DSML\s*{_BAR}\s*parameter\s+name=\"([^\"]+)\"(?:\s+string=\"(true|false)\")?\s*>(.*?)"
+                    rf"<\s*/\s*{_BAR}\s*DSML\s*{_BAR}\s*parameter\s*>", re.S)
+# Any tool-call markup a model might leave in its answer (DeepSeek DSML, <｜tool▁calls…>, <tool_call>, <function_calls>)
+LEAKED_MARKUP = re.compile(rf"{_TAG}\w+[^>]*>|<\s*{_BAR}\s*tool[^>]*>|<\s*/?\s*(?:tool_call|tool_calls|function_calls|invoke|parameter)\b[^>]*>",
+                           re.IGNORECASE)
+
+
+def text_tool_calls(text: str) -> tuple[str, list[tuple[str, dict]]]:
+    """(text without the markup, [(tool name, arguments)]) for tool calls written into the reply text."""
+    calls = []
+    for name, body in _INVOKE.findall(text or ""):
+        args = {}
+        for key, is_string, raw in _PARAM.findall(body):
+            raw = raw.strip()
+            if is_string == "true":
+                args[key] = raw
+            else:
+                try:
+                    args[key] = json.loads(raw)
+                except ValueError:
+                    args[key] = raw
+        calls.append((name.strip(), args))
+    if not calls:
+        return text, []
+    cleaned = _INVOKE.sub("", text)
+    cleaned = re.sub(rf"{_TAG}calls\s*>", "", cleaned)
+    return cleaned.strip(), calls
+
+
+def strip_markup(answer: str) -> str:
+    """Remove stray tool-call markup from a final answer: a reader should never see it."""
+    if not LEAKED_MARKUP.search(answer):
+        return answer
+    without_calls = _INVOKE.sub("", answer)
+    return re.sub(r"\n{3,}", "\n\n", LEAKED_MARKUP.sub("", without_calls)).strip()
+
+
 class OpenAICompatAdapter:
     """DeepSeek, Moonshot (Kimi) and self-hosted servers speak the OpenAI chat-completions protocol."""
 
@@ -234,15 +279,23 @@ class OpenAICompatAdapter:
             except json.JSONDecodeError:
                 calls.append(ToolCall(tc.id, tc.function.name, {}, error="Arguments were not valid JSON; call the tool again."))
         stop = {"tool_calls": "tool_use", "length": "max_tokens", "content_filter": "refusal"}.get(choice.finish_reason, "end")
-        if calls:
-            stop = "tool_use"
-        native = {"role": "assistant", "content": msg.content or ""}
+        text = msg.content or ""
+        native = {"role": "assistant", "content": text}
         if msg.tool_calls:
             native["tool_calls"] = [{"id": tc.id, "type": "function",
                                      "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
                                     for tc in msg.tool_calls]
+        elif tools:
+            text, written = text_tool_calls(text)
+            if written:   # tool calls written as text: run them like real ones, and record them that way in history
+                calls = [ToolCall(f"text_call_{i}", name, args) for i, (name, args) in enumerate(written)]
+                native = {"role": "assistant", "content": text, "tool_calls": [
+                    {"id": c.id, "type": "function", "function": {"name": c.name, "arguments": json.dumps(c.input)}}
+                    for c in calls]}
+        if calls:
+            stop = "tool_use"
         usage = {"input_tokens": r.usage.prompt_tokens, "output_tokens": r.usage.completion_tokens} if r.usage else {}
-        return Turn(text=(msg.content or "").strip(), tool_calls=calls, stop=stop, model=f"{self.provider}:{r.model}",
+        return Turn(text=text.strip(), tool_calls=calls, stop=stop, model=f"{self.provider}:{r.model}",
                     native=native, usage=usage)
 
     def tool_results(self, results: list[tuple[str, str, bool]]) -> list[dict]:
@@ -293,6 +346,8 @@ def effort(task: str) -> str | None:
 
 
 # ---------------------------------------------------------------- task entry points
+
+INCOMPLETE = "I couldn't finish researching that in time. Please ask again, or try a narrower question."
 
 # With a time budget (Ask FinSight), the model must answer once less than FINAL_RESERVE seconds remain; a repair
 # round only runs with REPAIR_MIN seconds left; and no single call may take longer than its share, or CALL_FLOOR.
@@ -356,9 +411,13 @@ def run_agent(system: str, messages: list[dict], tool_names: list[str] | None, s
             if len(turn.text) > 150:  # some models start the answer before their last tool call; keep it
                 drafted.append(turn.text)
 
+            offered = {t["name"] for t in tools}
+
             def run(call: ToolCall) -> tuple[str, bool]:
                 if call.error:
                     return json.dumps({"error": call.error}), True
+                if call.name not in offered:   # only the tools given for this question, whatever the model asks for
+                    return json.dumps({"error": f"{call.name} isn't available for this question."}), True
                 return T.run_tool(call.name, call.input, sources)
 
             with ThreadPoolExecutor(max(1, len(turn.tool_calls))) as pool:   # one round's tools run at once
@@ -374,7 +433,9 @@ def run_agent(system: str, messages: list[dict], tool_names: list[str] | None, s
 
         if final and turn.tool_calls:
             repaired = True   # the provider ignored "answer now": its unanswered tool calls rule out a repair turn
-        answer = "\n\n".join([*drafted, turn.text]) if drafted else turn.text
+        answer = strip_markup("\n\n".join([*drafted, turn.text]) if drafted else turn.text)
+        if not answer:   # nothing but tool-call markup: there's no answer to show
+            answer = INCOMPLETE
         drafted = []
         if turn.stop == "max_tokens":
             answer += "\n\n_(Cut off at the length limit.)_"
@@ -406,7 +467,7 @@ def run_agent(system: str, messages: list[dict], tool_names: list[str] | None, s
         return {"answer": answer, "outputs": outputs, "calls": calls, "unverified": missing,
                 "misattributed": wrong, "unsupported_quotes": quotes, "arithmetic": maths, "model": model, "usage": usage}
 
-    return {"answer": "Research did not finish within the step limit. Try a narrower question.",
+    return {"answer": INCOMPLETE,
             "outputs": outputs, "calls": calls, "unverified": [], "misattributed": [], "unsupported_quotes": [],
             "arithmetic": [], "model": model, "usage": usage}
 

@@ -339,3 +339,58 @@ def test_screens_dont_become_the_topic_and_get_screen_follow_ups():
     concept = {**conversation.empty(), "metric": "ROE"}
     assert conversation.follow_ups("general_finance", concept) == []                 # not a concept answer
     assert "How does ROE differ across industries?" in conversation.follow_ups("general_finance", concept, concept=True)
+
+
+DSML_REPLY = ('<｜｜DSML｜｜ calls> <｜｜DSML｜｜ invoke name="get_financials"> <｜｜DSML｜｜ parameter name="symbol" '
+              'string="true">PLTR.US</｜｜DSML｜｜ parameter> <｜｜DSML｜｜ parameter name="metrics" string="false">'
+              '["revenue"]</｜｜DSML｜｜ parameter> </｜｜DSML｜｜ invoke> </｜｜DSML｜｜ calls>')
+
+
+class _Reply:
+    """Just enough of an OpenAI chat-completions response for the adapter."""
+    def __init__(self, content, tool_calls=None, finish="stop"):
+        from types import SimpleNamespace as NS
+        msg = NS(content=content, tool_calls=tool_calls)
+        self.choices = [NS(message=msg, finish_reason=finish)]
+        self.model, self.usage = "deepseek-flash", None
+
+
+def test_tool_calls_written_as_text_are_run_not_shown(monkeypatch):
+    replies = iter([_Reply(DSML_REPLY), _Reply("Revenue was $100 M [S1].")])
+    adapter = llm.OpenAICompatAdapter.__new__(llm.OpenAICompatAdapter)
+    adapter.provider, adapter.model, adapter.effort = "deepseek", "deepseek-flash", None
+    adapter.client = type("C", (), {"with_options": lambda self, **k: self,
+                                    "chat": type("Ch", (), {"completions": type("Co", (), {
+                                        "create": staticmethod(lambda **k: next(replies))})()})()})()
+    monkeypatch.setattr(llm, "adapter", lambda task: adapter)
+    ran = []
+
+    def fake_tool(name, args, sources):
+        ran.append((name, args))
+        sid = sources.add("SEC EDGAR", None, "Palantir (PLTR.US): annual statements")
+        return json.dumps({"source": sid, "years": [{"year": "FY25", "revenue": 100.0}]}), False
+
+    monkeypatch.setattr(T, "run_tool", fake_tool)
+    run = llm.run_agent("sys", [{"role": "user", "content": "q"}], ["get_financials"], T.Sources())
+    assert ran == [("get_financials", {"symbol": "PLTR.US", "metrics": ["revenue"]})]   # JSON parameter decoded
+    assert run["answer"] == "Revenue was $100 M [S1]." and "DSML" not in run["answer"]
+
+
+def test_leftover_tool_markup_never_reaches_the_reader():
+    assert llm.strip_markup("Short answer.\n" + DSML_REPLY) == "Short answer."
+    assert llm.strip_markup("Fine answer with <b>no</b> markup.") == "Fine answer with <b>no</b> markup."
+    model = FakeModel(answer=DSML_REPLY)            # markup and nothing else, as the final answer
+    import pytest as _p
+    with _p.MonkeyPatch.context() as mp:
+        mp.setattr(llm, "adapter", lambda task: model)
+        run = llm.run_agent("sys", [{"role": "user", "content": "q"}], [], T.Sources(), verify=False)
+    assert run["answer"] == llm.INCOMPLETE
+
+
+def test_models_can_only_run_the_tools_offered(monkeypatch):
+    model = FakeModel()   # asks for the "slow" tool on its first turn
+    monkeypatch.setattr(llm, "adapter", lambda task: model)
+    monkeypatch.setattr(T, "TOOLS", [{"name": "slow"}, {"name": "calculate"}])
+    monkeypatch.setattr(T, "run_tool", lambda *a: pytest.fail("a tool that wasn't offered must not run"))
+    run = llm.run_agent("sys", [{"role": "user", "content": "q"}], ["calculate"], T.Sources(), verify=False)
+    assert all(c["error"] for c in run["calls"])
