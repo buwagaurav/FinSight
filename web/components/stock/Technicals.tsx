@@ -22,6 +22,11 @@ const OVERLAYS: Overlay[] = [
   { key: "sma200", label: "SMA 200", series: ["sma200"] },
   { key: "bollinger", label: "Bollinger", series: ["bb_upper", "bb_mid", "bb_lower"] },
   { key: "supertrend", label: "Supertrend", series: ["supertrend"] },
+  { key: "ichimoku", label: "Ichimoku", series: ["ichimoku_span_a"] },
+  { key: "psar", label: "Parabolic SAR", series: ["psar"] },
+  { key: "donchian", label: "Donchian", series: ["donchian_upper"] },
+  { key: "keltner", label: "Keltner", series: ["keltner_upper"] },
+  { key: "pivots", label: "Pivots", series: ["close"] },
   { key: "vwap", label: "VWAP", series: ["vwap"], intradayOnly: true },
 ];
 
@@ -29,6 +34,8 @@ const OVERLAYS: Overlay[] = [
 const TERM: Record<string, string> = {
   ema20: "EMA", ema50: "EMA", ema200: "EMA", sma: "SMA", rsi: "RSI", macd: "MACD", bollinger: "Bollinger",
   supertrend: "Supertrend", adx: "ADX", stochastic: "Stochastic", atr: "ATR", obv: "OBV", vwap: "VWAP",
+  ichimoku: "Ichimoku", psar: "Parabolic SAR", donchian: "Donchian", keltner: "Keltner", cci: "CCI",
+  williams_r: "Williams %R", mfi: "MFI", aroon: "Aroon", roc: "ROC", pivots: "Pivots",
 };
 const TONE = { positive: "good", negative: "bad", neutral: "neutral" } as const;
 const TONE_LABEL = { positive: "▲", negative: "▼", neutral: "●" };
@@ -155,7 +162,8 @@ export default function Technicals({ symbol }: { symbol: string }) {
             <Chart height={380} label={`${data.symbol} ${data.timeframe} price with indicator overlays`} build={(c) => {
               const base = baseOption(c);
               const palette: Record<string, string> = { ema20: c.s1, ema50: c.s2, ema200: c.s3, sma50: c.ink2, sma200: c.muted, vwap: c.s1 };
-              const overlays = OVERLAYS.filter((o) => on.has(o.key) && (!o.intradayOnly || timeframe === "intraday") && s[o.series[0]]);
+              const overlays = OVERLAYS.filter((o) => on.has(o.key) && (!o.intradayOnly || timeframe === "intraday")
+                && (o.key === "pivots" ? data.pivots : s[o.series[0]]));
               const series: object[] = [{
                 name: "Price", type: "candlestick",
                 data: data.bars.map((b) => [b[1], b[4], b[3], b[2]]),
@@ -168,6 +176,31 @@ export default function Technicals({ symbol }: { symbol: string }) {
                   const dir = s.supertrend_dir ?? [];
                   series.push(line("Supertrend (up)", s.supertrend.map((v, i) => (dir[i] === 1 ? v : null)), c.good, 2),
                               line("Supertrend (down)", s.supertrend.map((v, i) => (dir[i] === -1 ? v : null)), c.bad, 2));
+                } else if (o.key === "ichimoku") {
+                  // the cloud: span A and B, with the gap between them shaded (a stacked band from the lower span)
+                  const a = s.ichimoku_span_a, b = s.ichimoku_span_b;
+                  const low = a.map((v, i) => (v == null || b[i] == null ? null : Math.min(v, b[i]!)));
+                  const gap = a.map((v, i) => (v == null || b[i] == null ? null : Math.abs(v - b[i]!)));
+                  series.push(
+                    { ...line("Cloud base", low, "transparent", 0), stack: "cloud", tooltip: { show: false } },
+                    { ...line("Cloud", gap, "transparent", 0), stack: "cloud", areaStyle: { color: c.s2, opacity: 0.15 }, tooltip: { show: false } },
+                    line("Span A", a, c.good, 1), line("Span B", b, c.bad, 1),
+                    line("Conversion", s.ichimoku_tenkan, c.s1, 1), line("Base", s.ichimoku_kijun, c.s3, 1));
+                } else if (o.key === "psar") {
+                  series.push({ name: "Parabolic SAR", type: "scatter", symbolSize: 3, itemStyle: { color: c.ink2 },
+                    data: s.psar.map((v, i) => (v == null ? null : [i, v])) });
+                } else if (o.key === "donchian" || o.key === "keltner") {
+                  const color = o.key === "donchian" ? c.s3 : c.s2;
+                  series.push(line(`${o.label} upper`, s[`${o.key}_upper`], color, 1), line(`${o.label} middle`, s[`${o.key}_mid`], color, 1),
+                              line(`${o.label} lower`, s[`${o.key}_lower`], color, 1));
+                } else if (o.key === "pivots" && data.pivots) {
+                  // today's levels across the most recent session only
+                  const from = Math.max(0, n - (timeframe === "intraday" ? 75 : 20));
+                  for (const [k, v] of Object.entries(data.pivots.levels)) {
+                    const color = k === "P" ? c.ink2 : k.startsWith("R") ? c.bad : c.good;
+                    series.push({ ...line(`Pivot ${k}`, Array.from({ length: n }, (_, i) => (i >= from ? v : null)), color, 1),
+                                  lineStyle: { color, width: 1, type: "dashed" } });
+                  }
                 } else {
                   series.push(line(o.label, s[o.series[0]], palette[o.key] ?? c.s1));
                 }
@@ -215,6 +248,31 @@ export default function Technicals({ symbol }: { symbol: string }) {
               ...baseOption(c), legend: { show: false }, grid: { left: 8, right: 16, top: 8, bottom: 8, containLabel: true },
               xAxis: axis(c), yAxis: { ...baseOption(c).yAxis as object, scale: true, axisLabel: { color: c.muted, fontSize: 11, formatter: (v: number) => new Intl.NumberFormat("en-IN", { notation: "compact" }).format(v) } },
               series: [line("OBV", s.obv, c.s3, 1.5)],
+            })} />
+            <Panel title="CCI (20)" term="CCI" label="Commodity Channel Index with ±100 levels" build={(c) => ({
+              ...baseOption(c), legend: { show: false }, grid: { left: 8, right: 16, top: 8, bottom: 8, containLabel: true }, xAxis: axis(c),
+              series: [line("CCI", s.cci, c.s1, 1.5), guide(100, n, c.bad), guide(-100, n, c.good)],
+            })} />
+            <Panel title="Williams %R (14)" term="Williams %R" label="Williams %R with −20 and −80 levels" build={(c) => ({
+              ...baseOption(c), legend: { show: false }, grid: { left: 8, right: 16, top: 8, bottom: 8, containLabel: true }, xAxis: axis(c),
+              yAxis: { ...baseOption(c).yAxis as object, min: -100, max: 0, interval: 20 },
+              series: [line("%R", s.williams_r, c.s1, 1.5), guide(-20, n, c.bad), guide(-80, n, c.good)],
+            })} />
+            <Panel title="MFI (14)" term="MFI" label="Money Flow Index with 20 and 80 levels" build={(c) => ({
+              ...baseOption(c), legend: { show: false }, grid: { left: 8, right: 16, top: 8, bottom: 8, containLabel: true }, xAxis: axis(c),
+              yAxis: { ...baseOption(c).yAxis as object, min: 0, max: 100, interval: 20 },
+              series: [line("MFI", s.mfi, c.s3, 1.5), guide(80, n, c.bad), guide(20, n, c.good)],
+            })} />
+            <Panel title="Aroon (14)" term="Aroon" label="Aroon up and down" build={(c) => ({
+              ...baseOption(c), legend: { ...baseOption(c).legend as object, data: ["Aroon Up", "Aroon Down"] },
+              grid: { left: 8, right: 16, top: 28, bottom: 8, containLabel: true }, xAxis: axis(c),
+              yAxis: { ...baseOption(c).yAxis as object, min: 0, max: 100, interval: 25 },
+              series: [line("Aroon Up", s.aroon_up, c.good, 1.5), line("Aroon Down", s.aroon_down, c.bad, 1.5)],
+            })} />
+            <Panel title="Rate of Change (9)" term="ROC" label="Rate of change, percent" build={(c) => ({
+              ...baseOption(c), legend: { show: false }, grid: { left: 8, right: 16, top: 8, bottom: 8, containLabel: true }, xAxis: axis(c),
+              yAxis: { ...baseOption(c).yAxis as object, axisLabel: { color: c.muted, fontSize: 11, formatter: "{value}%" } },
+              series: [line("ROC %", s.roc, c.s2, 1.5), guide(0, n, c.muted)],
             })} />
             <Panel title="ATR (14)" term="ATR" label="Average true range" build={(c) => ({
               ...baseOption(c), legend: { show: false }, grid: { left: 8, right: 16, top: 8, bottom: 8, containLabel: true },

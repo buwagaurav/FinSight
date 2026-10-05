@@ -35,8 +35,8 @@ def build(symbol: str, years: int | None = None) -> dict:
         bars = cached(("indicator-bars", symbol, "daily"), ttl, lambda: candles._fetch(symbol, period, interval, adjust))
         tz = candles.SESSIONS[market][0]
         dates = [datetime.fromtimestamp(b[6] / 1000, tz).date() for b in bars]   # the exchange's calendar date
-        o, h, l, c = ([b[k] for b in bars] for k in (1, 2, 3, 4))
-        return backtest.run_all(dates, o, h, l, c, market, years)
+        o, h, l, c, v = ([b[k] for b in bars] for k in (1, 2, 3, 4, 5))
+        return backtest.run_all(dates, o, h, l, c, market, years, volumes=v)
 
     result = cached(("backtest", symbol, years), ttl, compute)
     return {"symbol": symbol, "market": market, "currency": "USD" if market == "US" else "INR", **result,

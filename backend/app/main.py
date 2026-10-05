@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field, field_validator
 
-from app import auth, backtest_view, candles, funds, gmp, ipos, loader, research, screener, security, technical_view, watchlist
+from app import auth, backtest_universe, backtest_view, candles, funds, gmp, ipos, loader, research, screener, security, technical_view, watchlist
 from app.ai import assistant, filings, guardrail, llm, report, screen_nl
 from app.providers import nse, sec, yahoo
 
@@ -153,6 +153,17 @@ def company_backtest(symbol: str, years: int | None = Query(None, description="5
         raise HTTPException(422, str(e))
     except Exception as e:
         raise upstream_error("Price data is unavailable right now. Please try again later.", e)
+
+
+@app.get("/api/backtest/universe")
+def backtest_universe_summary(years: int | None = Query(None, description="5, or omit for all available")):
+    """How every backtest rule did across the current Nifty 50 (computed nightly)."""
+    if years not in (None, 5):
+        raise HTTPException(422, "years must be 5 or omitted")
+    data = backtest_universe.latest(years)
+    if data is None:
+        raise HTTPException(404, "The Nifty 50 comparison hasn't been computed yet; it runs nightly.")
+    return data
 
 
 @app.get("/api/health/storage", dependencies=[Depends(require_admin)])

@@ -65,12 +65,24 @@ def build(symbol: str, timeframe: str = "daily") -> dict:
     adx, pdi, mdi = I.adx(h, l, c)
     atr = I.atr(h, l, c)
     obv = I.obv(c, v)
-    vwap = I.vwap(h, l, c, v, [datetime.fromtimestamp(t / 1000).date().isoformat() for t in ts]) if timeframe == "intraday" else None
+    sessions = [datetime.fromtimestamp(t / 1000, candles.SESSIONS[candles.market(symbol)][0]).date().isoformat() for t in ts]
+    vwap = I.vwap(h, l, c, v, sessions) if timeframe == "intraday" else None
+    dc_up, dc_mid, dc_low = I.donchian(h, l)
+    kc_up, kc_mid, kc_low = I.keltner(h, l, c)
+    aroon_up, aroon_down = I.aroon(h, l)
+    ich = I.ichimoku(h, l)
+    piv = _pivots(bars, sessions, timeframe, is_open)
 
     series = {"ema20": ema20, "ema50": ema50, "ema200": ema200, "sma50": sma50, "sma200": sma200,
               "bb_upper": bb_up, "bb_mid": bb_mid, "bb_lower": bb_low, "supertrend": st_line, "supertrend_dir": st_dir,
               "rsi": rsi, "macd": macd, "macd_signal": macd_sig, "macd_hist": macd_hist, "stoch_k": k, "stoch_d": d,
-              "adx": adx, "plus_di": pdi, "minus_di": mdi, "atr": atr, "obv": obv}
+              "adx": adx, "plus_di": pdi, "minus_di": mdi, "atr": atr, "obv": obv,
+              "donchian_upper": dc_up, "donchian_mid": dc_mid, "donchian_lower": dc_low,
+              "keltner_upper": kc_up, "keltner_mid": kc_mid, "keltner_lower": kc_low,
+              "cci": I.cci(h, l, c), "williams_r": I.williams_r(h, l, c), "mfi": I.mfi(h, l, c, v),
+              "aroon_up": aroon_up, "aroon_down": aroon_down, "roc": I.roc(c), "psar": I.psar(h, l),
+              "ichimoku_tenkan": ich["tenkan"], "ichimoku_kijun": ich["kijun"],
+              "ichimoku_span_a": ich["span_a"], "ichimoku_span_b": ich["span_b"]}
     if vwap:
         series["vwap"] = vwap
     start = max(0, len(bars) - shown)
@@ -80,7 +92,8 @@ def build(symbol: str, timeframe: str = "daily") -> dict:
     return {
         "symbol": symbol, "timeframe": timeframe, "interval": interval, "bar": noun,
         "bars": bars[start:], "series": out_series,
-        "readings": readings(c, v, series, sym, noun, long_term=timeframe != "intraday"),
+        "readings": readings(c, v, series, sym, noun, long_term=timeframe != "intraday", pivot=piv),
+        "pivots": piv,
         "market": {"id": candles.market(symbol), "open": is_open,
                    "last_bar": datetime.fromtimestamp(ts[-1] / 1000, timezone.utc).isoformat()},
         "refresh_seconds": LIVE_SECONDS[timeframe] if is_open else None,
@@ -91,7 +104,25 @@ def build(symbol: str, timeframe: str = "daily") -> dict:
     }
 
 
-def readings(c: list, v: list, s: dict, sym: str, noun: str, long_term: bool = True) -> list[dict]:
+def _pivots(bars: list, sessions: list[str], timeframe: str, is_open: bool) -> dict | None:
+    """Classic pivots from the last completed period: the previous day for daily and intraday views, the previous
+    week for weekly. A bar still forming (market open) doesn't count."""
+    if timeframe == "intraday":
+        days = sorted(set(sessions))
+        done = days[:-1] if is_open else days   # today's session isn't finished while the market is open
+        if not done:
+            return None
+        day = [b for b, d in zip(bars, sessions) if d == done[-1]]
+        h, l, c = max(b[2] for b in day), min(b[3] for b in day), day[-1][4]
+        label = datetime.fromisoformat(done[-1]).strftime("%d %b %Y")   # same style as daily bars
+    else:
+        bar = bars[-2] if is_open and len(bars) > 1 else bars[-1]
+        h, l, c, label = bar[2], bar[3], bar[4], bar[0]
+    return {"basis": f"{'week of ' if timeframe == 'weekly' else ''}{label}",
+            "levels": {k: round(x, 2) for k, x in I.pivots(h, l, c).items()}}
+
+
+def readings(c: list, v: list, s: dict, sym: str, noun: str, long_term: bool = True, pivot: dict | None = None) -> list[dict]:
     """One plain-language line per indicator, with a tone: positive, negative or neutral."""
     price = c[-1]
     last = {name: I.last(vals) for name, vals in s.items()}
@@ -173,6 +204,84 @@ def readings(c: list, v: list, s: dict, sym: str, noun: str, long_term: bool = T
                 "Volume flow is falling with the price (confirms the move)." if not obv_up and not price_up else
                 "Volume flow and price disagree over the last 20 bars (a divergence).")
         add("obv", "OBV", f"{s['obv'][-1]:,.0f}", text, "positive" if obv_up and price_up else "negative" if not (obv_up or price_up) else "neutral")
+
+    sa, sb = last["ichimoku_span_a"], last["ichimoku_span_b"]
+    if sa is not None and sb is not None:
+        top, bottom = max(sa, sb), min(sa, sb)
+        where = "above" if price > top else "below" if price < bottom else "inside"
+        cross = "conversion line above the base line" if last["ichimoku_tenkan"] > last["ichimoku_kijun"] else "conversion line below the base line"
+        add("ichimoku", "Ichimoku (9, 26, 52)", f"{sym}{bottom:,.0f} – {sym}{top:,.0f}",
+            f"Price is {where} the cloud; {cross}.", "positive" if where == "above" else "negative" if where == "below" else "neutral")
+
+    if last["psar"] is not None:
+        below = last["psar"] < price
+        add("psar", "Parabolic SAR", f"{sym}{last['psar']:,.2f}",
+            f"SAR is {'below' if below else 'above'} the price: {'uptrend' if below else 'downtrend'}.", "positive" if below else "negative")
+
+    if last["donchian_upper"] is not None:
+        up, low = last["donchian_upper"], last["donchian_lower"]
+        prior_up = s["donchian_upper"][-2] if len(s["donchian_upper"]) > 1 else None
+        prior_low = s["donchian_lower"][-2] if len(s["donchian_lower"]) > 1 else None
+        if prior_up is not None and price > prior_up:
+            text, tone = f"Closed at a new 20-{noun} high (a breakout).", "positive"
+        elif prior_low is not None and price < prior_low:
+            text, tone = f"Closed at a new 20-{noun} low (a breakdown).", "negative"
+        else:
+            text, tone = f"Price is {(price - low) / (up - low) * 100 if up != low else 50:.0f}% of the way up its 20-{noun} range.", "neutral"
+        add("donchian", "Donchian Channels (20)", f"{sym}{low:,.0f} – {sym}{up:,.0f}", text, tone)
+
+    if last["keltner_upper"] is not None:
+        up, low = last["keltner_upper"], last["keltner_lower"]
+        text = ("Price is above the upper channel: a strong move up." if price > up else
+                "Price is below the lower channel: a strong move down." if price < low else "Price is inside the channel.")
+        add("keltner", "Keltner Channels (20, 2)", f"{sym}{low:,.0f} – {sym}{up:,.0f}", text,
+            "positive" if price > up else "negative" if price < low else "neutral")
+
+    if last["cci"] is not None:
+        x = last["cci"]
+        text = ("Above +100: unusually strong upward momentum." if x > 100 else
+                "Below −100: unusually strong downward momentum." if x < -100 else "Between −100 and +100: no extreme.")
+        add("cci", "CCI (20)", f"{x:.0f}", text, "positive" if x > 100 else "negative" if x < -100 else "neutral")
+
+    if last["williams_r"] is not None:
+        x = last["williams_r"]
+        zone = "overbought zone (above −20)" if x > -20 else "oversold zone (below −80)" if x < -80 else "middle of its range"
+        add("williams_r", "Williams %R (14)", f"{x:.1f}", f"In the {zone}.")
+
+    if last["mfi"] is not None:
+        x = last["mfi"]
+        if x >= 80:
+            add("mfi", "MFI (14)", f"{x:.1f}", "Above 80: overbought zone, with heavy volume on up days.")
+        elif x <= 20:
+            add("mfi", "MFI (14)", f"{x:.1f}", "Below 20: oversold zone, with heavy volume on down days.")
+        else:
+            add("mfi", "MFI (14)", f"{x:.1f}", f"{'Above' if x >= 50 else 'Below'} 50: money flow is {'positive' if x >= 50 else 'negative'}.",
+                "positive" if x >= 50 else "negative")
+
+    au, ad = last["aroon_up"], last["aroon_down"]
+    if au is not None and ad is not None:
+        if au >= 70 and ad <= 30:
+            text, tone = "Recent highs, no recent lows: an uptrend.", "positive"
+        elif ad >= 70 and au <= 30:
+            text, tone = "Recent lows, no recent highs: a downtrend.", "negative"
+        else:
+            text, tone = "No clear trend from the timing of highs and lows.", "neutral"
+        add("aroon", "Aroon (14)", f"Up {au:.0f} / Down {ad:.0f}", text, tone)
+
+    if last["roc"] is not None:
+        x = last["roc"]
+        add("roc", "Rate of Change (9)", f"{x:+.2f}%", f"Price is {'up' if x >= 0 else 'down'} {abs(x):.2f}% over 9 {noun}s.",
+            "positive" if x >= 0 else "negative")
+
+    if pivot:
+        lv = pivot["levels"]
+        above = [k for k in ("R1", "R2", "R3") if lv[k] > price]
+        below = [k for k in ("S1", "S2", "S3") if lv[k] < price]
+        nxt = f"next resistance {above[0]} {sym}{lv[above[0]]:,.2f}" if above else "above all resistance levels"
+        sup = f"support {below[0]} {sym}{lv[below[0]]:,.2f}" if below else "below all support levels"
+        add("pivots", "Pivot points (classic)", f"{sym}{lv['P']:,.2f}",
+            f"From {pivot['basis']}. Price is {'above' if price > lv['P'] else 'below'} the pivot; {nxt}; {sup}.",
+            "positive" if price > lv["P"] else "negative")
 
     if s.get("vwap") and last.get("vwap") is not None:
         above = price > last["vwap"]

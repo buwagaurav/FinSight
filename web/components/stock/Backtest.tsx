@@ -1,13 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import Chart, { baseOption } from "@/components/Chart";
 import { Badge, Card, Skeleton, SourceLink } from "@/components/ui";
-import { api, Backtest as BacktestData, StrategyKey } from "@/lib/api";
+import { api, Backtest as BacktestData, BacktestUniverse, StrategyKey } from "@/lib/api";
 import { date, money, pct } from "@/lib/format";
 
-const KEYS: StrategyKey[] = ["ema_trend", "rsi", "macd", "supertrend"];
+const TYPE_ORDER = ["trend", "breakout", "mean reversion"];
+const TYPE_LABEL: Record<string, string> = { trend: "Trend-following", breakout: "Breakout", "mean reversion": "Mean reversion (buy weakness)" };
 const PERIODS = [{ years: null, label: "All (~9 years)" }, { years: 5, label: "Last 5 years" }] as const;
+
+/** One plain sentence on what the Nifty 50 run shows, worked out from the numbers. */
+function universeFinding(u: BacktestUniverse): string {
+  const rules = Object.values(u.rules);
+  const best = rules.reduce((a, b) => (b.beat_hold > a.beat_hold ? b : a));
+  const safer = rules.filter((r) => r.smaller_drawdown > r.stocks / 2).length;
+  const majority = rules.filter((r) => r.beat_hold > r.stocks / 2).length;
+  return `Across the Nifty 50, ${majority === 0 ? "no rule beat buy-and-hold on most stocks" : `${majority} rule${majority > 1 ? "s" : ""} beat buy-and-hold on most stocks`}`
+    + ` (the most: ${best.name}, on ${best.beat_hold} of ${best.stocks}); ${safer} of ${rules.length} had a smaller worst fall on most stocks.`;
+}
 
 /** A number with its sign, coloured only by sign: no "winner" styling, the reader judges. */
 function Signed({ v, suffix = "%" }: { v: number | null | undefined; suffix?: string }) {
@@ -20,6 +31,7 @@ export default function Backtest({ symbol }: { symbol: string }) {
   const [data, setData] = useState<BacktestData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pick, setPick] = useState<StrategyKey>("ema_trend");
+  const [universe, setUniverse] = useState<BacktestUniverse | null>(null);
 
   useEffect(() => {
     setData(null);
@@ -28,6 +40,16 @@ export default function Backtest({ symbol }: { symbol: string }) {
       .then(setData)
       .catch((e: Error) => setError(e.message));
   }, [symbol, years]);
+
+  // The same rules across the Nifty 50 (computed nightly): the check against one stock's lucky result
+  useEffect(() => {
+    setUniverse(null);
+    api<BacktestUniverse>(`/api/backtest/universe${years ? `?years=${years}` : ""}`, undefined, { cache: 3600 })
+      .then(setUniverse).catch(() => setUniverse(null));
+  }, [years]);
+
+  const keys = data ? Object.keys(data.results).filter((k) => k !== "buy_hold")
+    .sort((a, b) => TYPE_ORDER.indexOf(data.results[a].type ?? "") - TYPE_ORDER.indexOf(data.results[b].type ?? "")) : [];
 
   const cur = data?.currency ?? "INR";
   const m = (v: number) => money(v, cur, 0);
@@ -57,8 +79,14 @@ export default function Backtest({ symbol }: { symbol: string }) {
               {date(data.period.from)} to {date(data.period.to)} ({data.period.years} years), starting with {m(data.capital)}.
               Each rule trades at the next day&apos;s open after its signal. Click a row for details.
             </p>
+            <div className="mb-3 rounded-lg bg-surface-2 p-3 text-sm text-ink-2">
+              <span className="font-medium text-ink">{keys.length} rules tested.</span> With this many, some will beat buy-and-hold
+              on any one stock by chance. The <span className="font-medium text-ink">Across Nifty 50</span> column runs the same rule on
+              all 50 Nifty companies: a rule that only works here is probably luck.
+              {universe && <> {universeFinding(universe)}</>}
+            </div>
             <div className="scroll-shadow overflow-x-auto -mx-4 sm:mx-0">
-              <table className="w-full text-sm tabular min-w-[720px]">
+              <table className="w-full text-sm tabular min-w-[860px]">
                 <thead>
                   <tr className="text-left text-xs text-muted border-b border-line">
                     <th className="py-2 px-2 font-medium">Rule</th>
@@ -69,14 +97,21 @@ export default function Backtest({ symbol }: { symbol: string }) {
                     <th className="py-2 px-2 font-medium text-right">Trades</th>
                     <th className="py-2 px-2 font-medium text-right">Time invested</th>
                     <th className="py-2 px-2 font-medium text-right">Costs paid</th>
+                    <th className="py-2 px-2 font-medium text-right">Across Nifty 50</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(["buy_hold", ...KEYS] as const).map((k) => {
+                  {["buy_hold", ...keys].map((k, i, all) => {
                     const r = data.results[k];
                     const selectable = k !== "buy_hold";
+                    const u = universe?.rules[k];
+                    const groupStart = selectable && r.type !== data.results[all[i - 1]]?.type;
                     return (
-                      <tr key={k} onClick={selectable ? () => setPick(k as StrategyKey) : undefined}
+                      <Fragment key={k}>
+                      {groupStart && (
+                        <tr><td colSpan={9} className="pt-3 pb-1 px-2 text-xs font-medium text-muted uppercase tracking-wide">{TYPE_LABEL[r.type ?? ""] ?? r.type}</td></tr>
+                      )}
+                      <tr onClick={selectable ? () => setPick(k as StrategyKey) : undefined}
                         className={`border-b border-line/60 ${selectable ? "cursor-pointer hover:bg-surface-2/60" : "bg-surface-2/40"} ${pick === k ? "bg-accent-soft/50" : ""}`}>
                         <td className="py-2.5 px-2">
                           {selectable
@@ -90,13 +125,24 @@ export default function Backtest({ symbol }: { symbol: string }) {
                         <td className="py-2.5 px-2 text-right">{k === "buy_hold" ? <span className="text-muted">Held throughout</span> : <>{r.trades}{r.open_trade ? " + 1 open" : ""}</>}</td>
                         <td className="py-2.5 px-2 text-right">{pct(r.time_invested_pct, 0)}</td>
                         <td className="py-2.5 px-2 text-right">{m(r.costs_paid)}</td>
+                        <td className="py-2.5 px-2 text-right text-xs whitespace-nowrap">
+                          {k === "buy_hold"
+                            ? (universe ? <span className="text-muted">median CAGR {pct(universe.buy_hold_median_cagr_pct, 1)}</span> : <span className="text-muted">—</span>)
+                            : u ? <>beat on <b className="text-ink">{u.beat_hold}/{u.stocks}</b><span className="block text-muted">smaller fall {u.smaller_drawdown}/{u.stocks}</span></>
+                            : <span className="text-muted">—</span>}
+                        </td>
                       </tr>
+                      </Fragment>
                     );
                   })}
                 </tbody>
               </table>
             </div>
-            <p className="text-xs text-muted mt-2">CAGR: average yearly growth. &quot;vs buy &amp; hold&quot;: difference in CAGR, in percentage points. Worst fall: largest drop from a previous high.</p>
+            <p className="text-xs text-muted mt-2">
+              CAGR: average yearly growth. &quot;vs buy &amp; hold&quot;: difference in CAGR, in percentage points. Worst fall: largest drop
+              from a previous high. Across Nifty 50: on how many of the 50 stocks the rule beat buy-and-hold, and had a smaller worst
+              fall, over the same period{universe ? ` (updated ${date(universe.computed_at)}; today's members, so long-term returns are flattered by survivorship)` : " (computed nightly)"}.
+            </p>
           </>
         )}
       </Card>

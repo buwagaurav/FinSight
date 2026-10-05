@@ -189,3 +189,123 @@ def obv(close: list[float], volume: list[float]) -> Series:
 def last(series: Series) -> float | None:
     v = series[-1] if series else None
     return None if v is None or (isinstance(v, float) and math.isnan(v)) else v
+
+
+# ---------------------------------------------------------------- more indicators (TradingView defaults)
+
+def highest(values: list[float], n: int) -> Series:
+    return [None if i < n - 1 else max(values[i - n + 1:i + 1]) for i in range(len(values))]
+
+
+def lowest(values: list[float], n: int) -> Series:
+    return [None if i < n - 1 else min(values[i - n + 1:i + 1]) for i in range(len(values))]
+
+
+def donchian(high: list[float], low: list[float], n: int = 20) -> tuple[Series, Series, Series]:
+    """(upper, middle, lower): the highest high and lowest low of the last n bars, and their midpoint."""
+    up, lo = highest(high, n), lowest(low, n)
+    return up, [None if a is None else (a + b) / 2 for a, b in zip(up, lo)], lo
+
+
+def keltner(high: list[float], low: list[float], close: list[float], n: int = 20, mult: float = 2.0,
+            atr_n: int = 10) -> tuple[Series, Series, Series]:
+    """(upper, middle, lower): an EMA of the close with bands mult x ATR away (TradingView: 20, 2, ATR 10)."""
+    mid, a = ema(close, n), atr(high, low, close, atr_n)
+    upper: Series = [None if m is None or r is None else m + mult * r for m, r in zip(mid, a)]
+    lower: Series = [None if m is None or r is None else m - mult * r for m, r in zip(mid, a)]
+    return upper, mid, lower
+
+
+def cci(high: list[float], low: list[float], close: list[float], n: int = 20) -> Series:
+    """Commodity Channel Index: how far the typical price is from its average, in units of mean deviation."""
+    tp = [(h + l + c) / 3 for h, l, c in zip(high, low, close)]
+    avg = sma(tp, n)
+    out: Series = [None] * len(tp)
+    for i in range(n - 1, len(tp)):
+        window = tp[i - n + 1:i + 1]
+        md = sum(abs(x - avg[i]) for x in window) / n
+        out[i] = 0.0 if md == 0 else (tp[i] - avg[i]) / (0.015 * md)
+    return out
+
+
+def williams_r(high: list[float], low: list[float], close: list[float], n: int = 14) -> Series:
+    """Williams %R, -100 to 0: where the close sits below the last n bars' high."""
+    hh, ll = highest(high, n), lowest(low, n)
+    return [None if a is None else (-50.0 if a == b else -100 * (a - c) / (a - b)) for a, b, c in zip(hh, ll, close)]
+
+
+def mfi(high: list[float], low: list[float], close: list[float], volume: list[float], n: int = 14) -> Series:
+    """Money Flow Index, 0-100: RSI-like, weighting each day's typical price by its volume."""
+    tp = [(h + l + c) / 3 for h, l, c in zip(high, low, close)]
+    pos = [0.0] + [tp[i] * volume[i] if tp[i] > tp[i - 1] else 0.0 for i in range(1, len(tp))]
+    neg = [0.0] + [tp[i] * volume[i] if tp[i] < tp[i - 1] else 0.0 for i in range(1, len(tp))]
+    out: Series = [None] * len(tp)
+    for i in range(n, len(tp)):
+        up, down = sum(pos[i - n + 1:i + 1]), sum(neg[i - n + 1:i + 1])
+        out[i] = 100.0 if down == 0 else 100 - 100 / (1 + up / down)
+    return out
+
+
+def aroon(high: list[float], low: list[float], n: int = 14) -> tuple[Series, Series]:
+    """(Aroon up, Aroon down), 0-100: how recently the highest high / lowest low of the last n+1 bars happened."""
+    up: Series = [None] * len(high)
+    down: Series = [None] * len(high)
+    for i in range(n, len(high)):
+        hw, lw = high[i - n:i + 1], low[i - n:i + 1]
+        since_high = n - max(range(n + 1), key=lambda j: (hw[j], j))   # most recent bar wins a tie
+        since_low = n - max(range(n + 1), key=lambda j: (-lw[j], j))
+        up[i], down[i] = 100 * (n - since_high) / n, 100 * (n - since_low) / n
+    return up, down
+
+
+def roc(close: list[float], n: int = 9) -> Series:
+    """Rate of change: % change over the last n bars."""
+    return [None if i < n or close[i - n] == 0 else (close[i] / close[i - n] - 1) * 100 for i in range(len(close))]
+
+
+def psar(high: list[float], low: list[float], start: float = 0.02, step: float = 0.02, cap: float = 0.2) -> Series:
+    """Parabolic SAR (Wilder): a stop that trails the trend and jumps to the other side when price crosses it."""
+    out: Series = [None] * len(high)
+    if len(high) < 2:
+        return out
+    up = high[1] >= high[0]
+    sar = low[0] if up else high[0]
+    ep = high[1] if up else low[1]
+    af = start
+    for i in range(1, len(high)):
+        sar = sar + af * (ep - sar)
+        if up:
+            sar = min(sar, low[i - 1], low[i - 2] if i >= 2 else low[i - 1])
+            if low[i] < sar:   # reversal to down
+                up, sar, ep, af = False, ep, low[i], start
+            elif high[i] > ep:
+                ep, af = high[i], min(af + step, cap)
+        else:
+            sar = max(sar, high[i - 1], high[i - 2] if i >= 2 else high[i - 1])
+            if high[i] > sar:   # reversal to up
+                up, sar, ep, af = True, ep, high[i], start
+            elif low[i] < ep:
+                ep, af = low[i], min(af + step, cap)
+        out[i] = sar
+    return out
+
+
+def ichimoku(high: list[float], low: list[float], conv: int = 9, base: int = 26, span_b: int = 52,
+             shift: int = 26) -> dict[str, Series]:
+    """Conversion (Tenkan) and base (Kijun) lines, and the cloud (Senkou A/B) as it stands at each bar: the cloud
+    values were computed shift-1 bars earlier and plotted forward, as TradingView draws it."""
+    def mid(n):
+        hh, ll = highest(high, n), lowest(low, n)
+        return [None if a is None else (a + b) / 2 for a, b in zip(hh, ll)]
+    tenkan, kijun, b_raw = mid(conv), mid(base), mid(span_b)
+    a_raw: Series = [None if t is None or k is None else (t + k) / 2 for t, k in zip(tenkan, kijun)]
+    lag = shift - 1
+    return {"tenkan": tenkan, "kijun": kijun,
+            "span_a": [None] * lag + a_raw[:len(a_raw) - lag], "span_b": [None] * lag + b_raw[:len(b_raw) - lag]}
+
+
+def pivots(high: float, low: float, close: float) -> dict[str, float]:
+    """Classic floor-trader pivot levels from one completed period's high, low and close."""
+    p = (high + low + close) / 3
+    return {"P": p, "R1": 2 * p - low, "S1": 2 * p - high, "R2": p + (high - low), "S2": p - (high - low),
+            "R3": high + 2 * (p - low), "S3": low - 2 * (high - p)}

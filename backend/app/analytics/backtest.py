@@ -53,17 +53,97 @@ COST_NOTES = {
     "US": "SEC fee on sales and 0.05% slippage each way; no commission.",
 }
 
+# Textbook rules with their standard settings. "type": trend-following, mean reversion (buy weakness, sell
+# strength) or breakout.
 STRATEGIES = {
-    "ema_trend": {"name": "EMA 50/200 trend", "rule": "Hold while the 50-day EMA is above the 200-day EMA; otherwise stay in cash."},
-    "rsi": {"name": "RSI 30/70", "rule": "Buy when RSI (14) falls below 30; sell when it rises above 70."},
-    "macd": {"name": "MACD crossover", "rule": "Hold while MACD (12, 26, 9) is above its signal line; otherwise stay in cash."},
-    "supertrend": {"name": "Supertrend", "rule": "Hold while Supertrend (10, 3) shows an uptrend; otherwise stay in cash."},
+    "ema_trend": {"name": "EMA 50/200 trend", "type": "trend", "rule": "Hold while the 50-day EMA is above the 200-day EMA; otherwise stay in cash."},
+    "sma_cross": {"name": "SMA 50/200 golden cross", "type": "trend", "rule": "Hold while the 50-day SMA is above the 200-day SMA (from a golden cross to a death cross)."},
+    "macd": {"name": "MACD crossover", "type": "trend", "rule": "Hold while MACD (12, 26, 9) is above its signal line; otherwise stay in cash."},
+    "supertrend": {"name": "Supertrend", "type": "trend", "rule": "Hold while Supertrend (10, 3) shows an uptrend; otherwise stay in cash."},
+    "psar": {"name": "Parabolic SAR", "type": "trend", "rule": "Hold while the Parabolic SAR (0.02, 0.2) is below the price."},
+    "adx_trend": {"name": "ADX trend filter", "type": "trend", "rule": "Hold while ADX (14) is above 25 and +DI is above −DI (a strong uptrend)."},
+    "ichimoku": {"name": "Ichimoku cloud", "type": "trend", "rule": "Hold while the close is above the Ichimoku cloud (9, 26, 52)."},
+    "donchian": {"name": "Donchian breakout", "type": "breakout", "rule": "Buy on a close above the previous 20-day high; sell on a close below the previous 10-day low (Turtle-style)."},
+    "rsi": {"name": "RSI 30/70", "type": "mean reversion", "rule": "Buy when RSI (14) falls below 30; sell when it rises above 70."},
+    "bollinger": {"name": "Bollinger mean reversion", "type": "mean reversion", "rule": "Buy on a close below the lower Bollinger Band (20, 2); sell on a close above the middle band."},
+    "stochastic": {"name": "Stochastic 20/80", "type": "mean reversion", "rule": "Buy when %K (14, 1, 3) rises back above 20; sell when it falls back below 80."},
+    "cci": {"name": "CCI ±100", "type": "mean reversion", "rule": "Buy when CCI (20) rises back above −100; sell when it falls back below +100."},
+    "mfi": {"name": "MFI 20/80", "type": "mean reversion", "rule": "Buy when MFI (14) falls below 20; sell when it rises above 80."},
 }
 WARM_UP = 200   # bars before the first trade, so every rule (EMA 200 needs most) starts on the same day
 
 
-def signals(strategy: str, high: list, low: list, close: list) -> list[int | None]:
+def _stateful(values: list, enter, leave) -> list[int | None]:
+    """A position that opens when enter(prev, now) and closes when leave(prev, now)."""
+    out: list[int | None] = []
+    holding, prev = 0, None
+    for v in values:
+        if v is None:
+            out.append(None)
+            prev = None
+            continue
+        if prev is not None:
+            if not holding and enter(prev, v):
+                holding = 1
+            elif holding and leave(prev, v):
+                holding = 0
+        out.append(holding)
+        prev = v
+    return out
+
+
+def _hold_while(cond: list) -> list[int | None]:
+    return [None if x is None else int(x) for x in cond]
+
+
+def signals(strategy: str, high: list, low: list, close: list, volume: list | None = None) -> list[int | None]:
     """Desired position after each bar's close: 1 = hold the stock, 0 = cash, None = not enough data yet."""
+    n = len(close)
+    if strategy == "sma_cross":
+        fast, slow = I.sma(close, 50), I.sma(close, 200)
+        return _hold_while([None if f is None or s is None else f > s for f, s in zip(fast, slow)])
+    if strategy == "psar":
+        sar = I.psar(high, low)
+        return _hold_while([None if x is None else x < c for x, c in zip(sar, close)])
+    if strategy == "adx_trend":
+        adx, plus, minus = I.adx(high, low, close)
+        return _hold_while([None if a is None else a > 25 and p > m for a, p, m in zip(adx, plus, minus)])
+    if strategy == "ichimoku":
+        ich = I.ichimoku(high, low)
+        return _hold_while([None if a is None or b is None else c > max(a, b) for a, b, c in zip(ich["span_a"], ich["span_b"], close)])
+    if strategy == "donchian":
+        hi20, lo10 = I.highest(high, 20), I.lowest(low, 10)
+        out, holding = [], 0
+        for i in range(n):
+            if i < 20:
+                out.append(None)
+                continue
+            if not holding and close[i] > hi20[i - 1]:     # beyond the previous 20 bars' high (not including today)
+                holding = 1
+            elif holding and close[i] < lo10[i - 1]:
+                holding = 0
+            out.append(holding)
+        return out
+    if strategy == "bollinger":
+        upper, mid, lower = I.bollinger(close)
+        out, holding = [], 0
+        for c, m, lo in zip(close, mid, lower):
+            if m is None:
+                out.append(None)
+                continue
+            if not holding and c < lo:
+                holding = 1
+            elif holding and c > m:
+                holding = 0
+            out.append(holding)
+        return out
+    if strategy == "stochastic":
+        k, _ = I.stochastic(high, low, close)
+        return _stateful(k, lambda p, v: p <= 20 < v, lambda p, v: p >= 80 > v)
+    if strategy == "cci":
+        return _stateful(I.cci(high, low, close), lambda p, v: p <= -100 < v, lambda p, v: p >= 100 > v)
+    if strategy == "mfi":
+        return _stateful(I.mfi(high, low, close, volume or [1.0] * n), lambda p, v: v < 20, lambda p, v: v > 80)
     if strategy == "ema_trend":
         fast, slow = I.ema(close, 50), I.ema(close, 200)
         return [None if f is None or s is None else int(f > s) for f, s in zip(fast, slow)]
@@ -176,7 +256,7 @@ def yearly(dates: list[date], curves: dict[str, list[float]], capital: float = C
 
 
 def run_all(dates: list[date], opens: list, highs: list, lows: list, closes: list, market: str,
-            years: int | None = None) -> dict:
+            years: int | None = None, volumes: list | None = None, detail: bool = True) -> dict:
     """Every strategy and buy-and-hold over the same period: from the later of WARM_UP bars in and `years` back."""
     costs = INDIA if market == "IN" else US
     capital = CAPITAL_BY_MARKET[market]
@@ -193,9 +273,9 @@ def run_all(dates: list[date], opens: list, highs: list, lows: list, closes: lis
     out = {"buy_hold": {"name": "Buy and hold", "rule": "Buy on the first day and hold to the end.",
                         **metrics(hold.equity, period, hold, capital)}}
     for key, info in STRATEGIES.items():
-        res = simulate(dates, opens, closes, signals(key, highs, lows, closes), start, costs, capital)
+        res = simulate(dates, opens, closes, signals(key, highs, lows, closes, volumes), start, costs, capital)
         curves[key] = res.equity
-        out[key] = {**info, **metrics(res.equity, period, res, capital), "trades_list": res.trades}
+        out[key] = {**info, **metrics(res.equity, period, res, capital), **({"trades_list": res.trades} if detail else {})}
     for key in STRATEGIES:
         out[key]["cagr_vs_hold_pct"] = out[key]["cagr_pct"] - out["buy_hold"]["cagr_pct"]
     step = max(1, -(-len(period) // 300))   # at most ~300 points per curve: plenty for a chart

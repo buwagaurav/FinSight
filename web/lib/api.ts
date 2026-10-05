@@ -348,6 +348,7 @@ export type IndicatorView = {
   series: Record<string, (number | null)[]>;
   readings: IndicatorReading[];
   market: { id: "IN" | "US"; open: boolean; last_bar: string };
+  pivots: { basis: string; levels: Record<"P" | "R1" | "R2" | "R3" | "S1" | "S2" | "S3", number> } | null;
   refresh_seconds: number | null;   // set while the market is open: re-ask this often
   source: Source; note: string;
 };
@@ -356,16 +357,24 @@ export type IndicatorView = {
 
 export type BacktestTrade = { entry_date: string; entry_price: number; shares: number; exit_date: string | null; exit_price: number; return_pct: number; open: boolean };
 export type BacktestResult = {
-  name: string; rule: string; final_value: number; total_return_pct: number; cagr_pct: number; max_drawdown_pct: number;
+  name: string; rule: string; type?: "trend" | "breakout" | "mean reversion"; final_value: number; total_return_pct: number; cagr_pct: number; max_drawdown_pct: number;
   trades: number; open_trade: boolean; time_invested_pct: number; win_rate_pct: number | null; avg_win_pct: number | null;
   avg_loss_pct: number | null; worst_losing_streak: number; costs_paid: number; cagr_vs_hold_pct?: number; trades_list?: BacktestTrade[];
 };
-export type StrategyKey = "ema_trend" | "rsi" | "macd" | "supertrend";
+export type StrategyKey = string;   // "ema_trend", "rsi", ... (13 rules) as the API lists them
 export type Backtest = {
   symbol: string; market: "IN" | "US"; currency: "INR" | "USD"; capital: number; costs: string;
   period: { from: string; to: string; years: number; bars: number };
-  results: Record<"buy_hold" | StrategyKey, BacktestResult>;
-  curves: { dates: string[] } & Record<"buy_hold" | StrategyKey, number[]>;
-  yearly: ({ year: number; partial: boolean } & Record<"buy_hold" | StrategyKey, number>)[];
+  results: Record<string, BacktestResult>;          // "buy_hold" plus every rule
+  curves: { dates: string[] } & Record<string, number[]>;
+  yearly: ({ year: number; partial: boolean } & Record<string, number>)[];
   warnings: string[]; source: Source;
+};
+export type UniverseRule = {
+  name: string; type: string; rule: string; stocks: number; beat_hold: number; smaller_drawdown: number;
+  median_cagr_gap_pts: number; median_drawdown_gap_pts: number; median_trades: number;
+};
+export type BacktestUniverse = {
+  universe: string; stocks: string[]; rules_tested: number; buy_hold_median_cagr_pct: number;
+  rules: Record<string, UniverseRule>; skipped: string[]; computed_at: string;
 };

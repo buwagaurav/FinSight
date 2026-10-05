@@ -90,3 +90,27 @@ def test_refreshes_only_while_the_market_is_open(fake_bars, monkeypatch):
     monkeypatch.setattr(candles, "session_open", lambda symbol, now=None: False)
     view = technical_view.build("TCS", "weekly")
     assert view["refresh_seconds"] is None and view["market"]["open"] is False
+
+
+def test_channel_and_oscillator_extremes():
+    up_h, up_l, up_c = _hlc(UP)
+    dc_up, dc_mid, dc_low = I.donchian(up_h, up_l)
+    assert dc_up[-1] == up_h[-1] and dc_low[-1] == up_l[-20]                 # highest high / lowest low of 20 bars
+    assert I.williams_r(up_h, up_l, up_c)[-1] == pytest.approx(-100 * 1 / (up_h[-1] - up_l[-14]))
+    assert I.cci(*_hlc(FLAT))[-1] == 0
+    assert I.mfi(up_h, up_l, up_c, [1000] * 300)[-1] == 100                  # money only flowed in
+    a_up, a_down = I.aroon(up_h, up_l)
+    assert a_up[-1] == 100 and a_down[-1] == 0                               # newest bar is the high, oldest the low
+    assert I.roc(UP)[-1] == pytest.approx((UP[-1] / UP[-10] - 1) * 100)
+
+
+def test_trend_followers_sit_on_the_right_side():
+    up_h, up_l, up_c = _hlc(UP)
+    sar = I.psar(up_h, up_l)
+    assert all(s < c for s, c in zip(sar[5:], up_c[5:]))                     # SAR trails below a rising price
+    ich = I.ichimoku(up_h, up_l)
+    assert ich["span_a"][24] is None and ich["span_a"][-1] is not None        # cloud plotted 25 bars ahead
+    assert up_c[-1] > max(ich["span_a"][-1], ich["span_b"][-1])               # a rising price is above the cloud
+    upper, mid, lower = I.keltner(*_hlc(FLAT, spread=2))
+    assert mid[-1] == pytest.approx(100) and upper[-1] == pytest.approx(108)  # EMA ± 2 × ATR (ATR = 4)
+    assert I.pivots(110, 90, 100) == {"P": 100, "R1": 110, "S1": 90, "R2": 120, "S2": 80, "R3": 130, "S3": 70}
