@@ -27,7 +27,7 @@ def test_moving_averages():
 def test_rsi_extremes():
     assert I.rsi(UP)[-1] == pytest.approx(100)
     assert I.rsi(DOWN)[-1] == pytest.approx(0)
-    assert I.rsi(FLAT)[-1] == 50
+    assert I.rsi(FLAT)[-1] == 100                                           # no down moves: 100, as on TradingView
     assert I.rsi(UP)[13] is None and I.rsi(UP)[14] is not None              # 14 changes needed
 
 

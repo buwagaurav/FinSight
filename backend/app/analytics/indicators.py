@@ -1,5 +1,6 @@
-"""Technical indicators, computed the standard way (as TradingView, Zerodha Kite and most charting platforms do):
-EMAs seeded with an SMA, and Wilder's smoothing for RSI, ATR and ADX.
+"""Technical indicators, computed as TradingView's built-ins do (Pine Script ta.ema, ta.rma, ta.rsi, ta.macd, ta.bb,
+ta.atr, ta.supertrend, ta.dmi, ta.stoch, ta.vwap, ta.obv): EMAs seeded with an SMA, Wilder's smoothing (RMA) for
+RSI, ATR and ADX, population standard deviation for Bollinger Bands.
 
 Every function takes plain lists (oldest first) and returns a list of the same length, with None where there isn't
 enough history yet (the "warm-up"). Pure arithmetic: fetching is done elsewhere.
@@ -57,7 +58,7 @@ def rsi(close: list[float], n: int = 14) -> Series:
         if g is None or l is None:
             out.append(None)
         elif l == 0:
-            out.append(100.0 if g > 0 else 50.0)
+            out.append(100.0)   # no down moves at all: 100, as TradingView shows
         else:
             out.append(100 - 100 / (1 + g / l))
     return out
@@ -143,9 +144,10 @@ def adx(high: list[float], low: list[float], close: list[float], n: int = 14) ->
     return rma(dx, n), plus_di, minus_di
 
 
-def stochastic(high: list[float], low: list[float], close: list[float], n: int = 14, smooth_k: int = 3,
+def stochastic(high: list[float], low: list[float], close: list[float], n: int = 14, smooth_k: int = 1,
                smooth_d: int = 3) -> tuple[Series, Series]:
-    """Slow stochastic (%K, %D), 0-100: where the close sits in the last n bars' high-low range."""
+    """Stochastic (%K, %D), 0-100: where the close sits in the last n bars' high-low range. Defaults are
+    TradingView's (14, 1, 3); smooth_k=3 gives the "slow" stochastic."""
     fast: list[float] = []
     first = n - 1
     for i in range(first, len(close)):

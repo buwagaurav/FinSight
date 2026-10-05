@@ -1,7 +1,11 @@
 """The stock page's Technicals tab: price bars with common indicators, and a plain-language reading of each.
 
-Indicators are computed over a longer history than is shown, so long averages (200 bars) are already "warmed up" on
-the first bar on screen. Readings describe what an indicator shows now; they are not buy or sell signals.
+Matches TradingView's defaults so the numbers agree with what traders see there:
+- prices adjusted for splits but not dividends (Yahoo's unadjusted OHLC is already split-adjusted);
+- indicators computed over as much history as Yahoo gives (10 years daily, all weekly, 60 days of 5-minute bars),
+  so long averages have forgotten their starting point, as on TradingView, which uses the full history;
+- standard settings, including TradingView's Stochastic (14, 1, 3).
+Readings describe what an indicator shows now; they are not buy or sell signals.
 """
 from datetime import datetime
 
@@ -10,11 +14,11 @@ from app.analytics import indicators as I
 from app.cache import cached
 from app.providers import sec, yahoo
 
-# timeframe -> (Yahoo period, interval, bars shown, adjust for splits/dividends, cache seconds, bar noun)
+# timeframe -> (Yahoo period fetched, interval, bars shown, adjust for dividends, cache seconds, bar noun)
 TIMEFRAMES = {
-    "daily": ("2y", "1d", 252, True, 900, "day"),
-    "weekly": ("10y", "1wk", 260, True, 3600, "week"),
-    "intraday": ("5d", "5m", 400, False, 120, "bar"),   # 5-minute bars
+    "daily": ("10y", "1d", 252, False, 900, "day"),
+    "weekly": ("max", "1wk", 260, False, 3600, "week"),
+    "intraday": ("60d", "5m", 375, False, 120, "bar"),   # 5-minute bars: ~75 a day, so 5 days are shown
 }
 
 
@@ -50,7 +54,7 @@ def build(symbol: str, timeframe: str = "daily") -> dict:
     st_line, st_dir = I.supertrend(h, l, c)
     rsi = I.rsi(c)
     macd, macd_sig, macd_hist = I.macd(c)
-    k, d = I.stochastic(h, l, c)
+    k, d = I.stochastic(h, l, c)   # TradingView's default (14, 1, 3)
     adx, pdi, mdi = I.adx(h, l, c)
     atr = I.atr(h, l, c)
     obv = I.obv(c, v)
@@ -72,7 +76,8 @@ def build(symbol: str, timeframe: str = "daily") -> dict:
         "readings": readings(c, v, series, sym, noun, long_term=timeframe != "intraday"),
         "source": {"name": "Yahoo Finance chart data", "url": f"https://finance.yahoo.com/quote/{yahoo.yahoo_ticker(symbol)}/chart"},
         "note": "Indicators describe past price and volume behaviour. They are not buy or sell signals and don't "
-                "predict prices." + (" Past prices are adjusted for splits and dividends." if adjust else ""),
+                "predict prices. Settings and price adjustment (splits, not dividends) match TradingView's defaults; "
+                "OBV's level depends on where the history starts, so compare its direction rather than its value.",
     }
 
 
@@ -145,7 +150,7 @@ def readings(c: list, v: list, s: dict, sym: str, noun: str, long_term: bool = T
     kk, dd = last["stoch_k"], last["stoch_d"]
     if kk is not None and dd is not None:
         zone = "overbought zone (above 80)" if kk >= 80 else "oversold zone (below 20)" if kk <= 20 else "middle of its range"
-        add("stochastic", "Stochastic (14, 3, 3)", f"{kk:.1f}", f"%K is in the {zone}, {'above' if kk > dd else 'below'} %D.")
+        add("stochastic", "Stochastic (14, 1, 3)", f"{kk:.1f}", f"%K is in the {zone}, {'above' if kk > dd else 'below'} %D.")
 
     if last["atr"] is not None:
         add("atr", "ATR (14)", f"{sym}{last['atr']:,.2f}",

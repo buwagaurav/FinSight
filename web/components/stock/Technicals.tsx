@@ -162,7 +162,7 @@ export default function Technicals({ symbol }: { symbol: string }) {
                 line("MACD", s.macd, c.s1, 1.5), line("Signal", s.macd_signal, c.s2, 1.5),
               ],
             })} />
-            <Panel title="Stochastic (14, 3, 3)" term="Stochastic" label="Stochastic %K and %D with 20 and 80 levels" build={(c) => ({
+            <Panel title="Stochastic (14, 1, 3)" term="Stochastic" label="Stochastic %K and %D with 20 and 80 levels" build={(c) => ({
               ...baseOption(c), legend: { ...baseOption(c).legend as object, data: ["%K", "%D"] },
               grid: { left: 8, right: 16, top: 28, bottom: 8, containLabel: true }, xAxis: axis(c),
               yAxis: { ...baseOption(c).yAxis as object, min: 0, max: 100, interval: 20 },
