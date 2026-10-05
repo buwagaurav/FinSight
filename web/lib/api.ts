@@ -351,3 +351,21 @@ export type IndicatorView = {
   refresh_seconds: number | null;   // set while the market is open: re-ask this often
   source: Source; note: string;
 };
+
+// ---------------------------------------------------------------- backtests
+
+export type BacktestTrade = { entry_date: string; entry_price: number; shares: number; exit_date: string | null; exit_price: number; return_pct: number; open: boolean };
+export type BacktestResult = {
+  name: string; rule: string; final_value: number; total_return_pct: number; cagr_pct: number; max_drawdown_pct: number;
+  trades: number; open_trade: boolean; time_invested_pct: number; win_rate_pct: number | null; avg_win_pct: number | null;
+  avg_loss_pct: number | null; worst_losing_streak: number; costs_paid: number; cagr_vs_hold_pct?: number; trades_list?: BacktestTrade[];
+};
+export type StrategyKey = "ema_trend" | "rsi" | "macd" | "supertrend";
+export type Backtest = {
+  symbol: string; market: "IN" | "US"; currency: "INR" | "USD"; capital: number; costs: string;
+  period: { from: string; to: string; years: number; bars: number };
+  results: Record<"buy_hold" | StrategyKey, BacktestResult>;
+  curves: { dates: string[] } & Record<"buy_hold" | StrategyKey, number[]>;
+  yearly: ({ year: number; partial: boolean } & Record<"buy_hold" | StrategyKey, number>)[];
+  warnings: string[]; source: Source;
+};

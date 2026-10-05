@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field, field_validator
 
-from app import auth, candles, funds, gmp, ipos, loader, research, screener, security, technical_view, watchlist
+from app import auth, backtest_view, candles, funds, gmp, ipos, loader, research, screener, security, technical_view, watchlist
 from app.ai import assistant, filings, guardrail, llm, report, screen_nl
 from app.providers import nse, sec, yahoo
 
@@ -137,6 +137,20 @@ def company_indicators(symbol: str, timeframe: Literal["daily", "weekly", "intra
         return technical_view.build(symbol, timeframe)
     except LookupError:
         raise HTTPException(404, f"Not enough price history for {symbol} to compute indicators")
+    except Exception as e:
+        raise upstream_error("Price data is unavailable right now. Please try again later.", e)
+
+
+@app.get("/api/company/{symbol}/backtest")
+def company_backtest(symbol: str, years: int | None = Query(None, description="5 or 10; omit for all available")):
+    if years not in (None, 5, 10):
+        raise HTTPException(422, "years must be 5 or 10")
+    try:
+        return backtest_view.build(symbol, years)
+    except LookupError:
+        raise HTTPException(404, f"No price history for {symbol}")
+    except ValueError as e:   # too little history: our own message
+        raise HTTPException(422, str(e))
     except Exception as e:
         raise upstream_error("Price data is unavailable right now. Please try again later.", e)
 
