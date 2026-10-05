@@ -9,6 +9,7 @@ import ScorePanel from "@/components/stock/ScorePanel";
 import Overview from "@/components/stock/Overview";
 import Fundamentals from "@/components/stock/Fundamentals";
 import Valuation from "@/components/stock/Valuation";
+import Technicals from "@/components/stock/Technicals";
 import News, { newsPath } from "@/components/stock/News";
 import AskPanel from "@/components/stock/AskPanel";
 import Filings, { CACHE_SECONDS, filingsPath } from "@/components/stock/Filings";
@@ -16,7 +17,7 @@ import ResearchReport from "@/components/stock/ResearchReport";
 import { ErrorBox, Skeleton } from "@/components/ui";
 import { api, Company, prefetch } from "@/lib/api";
 
-const TABS = ["Overview", "Fundamentals", "Valuation", "Filings & news", "AI report"] as const;
+const TABS = ["Overview", "Fundamentals", "Valuation", "Technicals", "Filings & news", "AI report"] as const;
 type Tab = (typeof TABS)[number];
 const slug = (t: string) => t.toLowerCase().replace(/[^a-z]+/g, "-").replace(/-+$/, "");
 
@@ -72,6 +73,7 @@ export default function StockPage() {
       {tab === "Overview" && <Overview c={data} />}
       {tab === "Fundamentals" && <Fundamentals c={data} />}
       {tab === "Valuation" && <Valuation c={data} />}
+      {tab === "Technicals" && <Technicals symbol={data.profile.symbol} />}
       {tab === "AI report" && <ResearchReport symbol={data.profile.symbol} name={data.profile.name} />}
       {tab === "Filings & news" && <div className="grid lg:grid-cols-5 gap-4"><div className="lg:col-span-3"><Filings symbol={sym} /></div><div className="lg:col-span-2"><News symbol={sym} /></div></div>}
     </div>

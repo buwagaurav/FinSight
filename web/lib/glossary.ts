@@ -21,4 +21,16 @@ export const GLOSSARY: Record<string, string> = {
   Subscription: "How many times the shares on offer have been applied for. 3x means demand was three times the supply.",
   Volatility: "How much the price swings in a year. Higher means a bumpier ride.",
   Drawdown: "The largest fall from a previous high.",
+  // technical indicators (Technicals tab)
+  EMA: "Exponential moving average: the average closing price over a period, weighting recent days more. Price above a rising EMA is read as an uptrend.",
+  SMA: "Simple moving average: the plain average closing price over a period. The 50 crossing above the 200 is called a golden cross; below, a death cross.",
+  RSI: "Relative Strength Index (0-100): the strength of recent gains against recent losses. Above 70 is called overbought, below 30 oversold; strong trends can stay there.",
+  MACD: "Moving Average Convergence Divergence: the gap between the 12- and 26-period EMAs, and its 9-period average (signal line). Above the signal line means momentum is improving.",
+  Bollinger: "Bollinger Bands: a band 2 standard deviations either side of the 20-period average. Unusually narrow bands (a squeeze) often come before a big move.",
+  Supertrend: "A line that trails the price using its average range (ATR). Price above it is read as an uptrend, below as a downtrend; it flips when the trend turns.",
+  ADX: "Average Directional Index: how strong a trend is, not its direction. Below 20 means no clear trend, above 25 a strong one. +DI above −DI means the trend is up.",
+  Stochastic: "Where the close sits in the recent high-low range (0-100). Above 80 is called overbought, below 20 oversold. %D is a smoothed %K.",
+  ATR: "Average True Range: how far the price typically moves in one bar, in rupees (or dollars). Often used to set stop-losses.",
+  OBV: "On-Balance Volume: a running total adding volume on up days and subtracting it on down days. It rising with the price confirms the move.",
+  VWAP: "Volume-weighted average price for the day. Traders compare the price with it intraday; it restarts every session.",
 };

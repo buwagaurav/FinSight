@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field, field_validator
 
-from app import auth, candles, funds, gmp, ipos, loader, research, screener, security, watchlist
+from app import auth, candles, funds, gmp, ipos, loader, research, screener, security, technical_view, watchlist
 from app.ai import assistant, filings, guardrail, llm, report, screen_nl
 from app.providers import nse, sec, yahoo
 
@@ -129,6 +129,16 @@ def company_candles(symbol: str, range: Literal[tuple(candles.RANGES)] = "1d"): 
         return candles.candles(symbol, range)
     except LookupError:
         raise HTTPException(404, f"No price data for {symbol}")
+
+
+@app.get("/api/company/{symbol}/indicators")
+def company_indicators(symbol: str, timeframe: Literal["daily", "weekly", "intraday"] = "daily"):
+    try:
+        return technical_view.build(symbol, timeframe)
+    except LookupError:
+        raise HTTPException(404, f"Not enough price history for {symbol} to compute indicators")
+    except Exception as e:
+        raise upstream_error("Price data is unavailable right now. Please try again later.", e)
 
 
 @app.get("/api/health/storage", dependencies=[Depends(require_admin)])

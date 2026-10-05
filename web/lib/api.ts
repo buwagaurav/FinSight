@@ -337,3 +337,15 @@ export type FundDetail = {
   scheme: FundScheme; variants: FundScheme[]; source: Source;
   direct_vs_regular: { direct: number; regular: number; direct_ahead_pct: number } | null;
 };
+
+// ---------------------------------------------------------------- technical indicators
+
+export type Timeframe = "daily" | "weekly" | "intraday";
+export type IndicatorReading = { key: string; name: string; value: string; reading: string; tone: "positive" | "negative" | "neutral" };
+export type IndicatorView = {
+  symbol: string; timeframe: Timeframe; interval: string; bar: string;
+  bars: [string, number, number, number, number, number, number][];   // label, open, high, low, close, volume, ms
+  series: Record<string, (number | null)[]>;
+  readings: IndicatorReading[];
+  source: Source; note: string;
+};

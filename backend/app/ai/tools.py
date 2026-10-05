@@ -115,7 +115,9 @@ TOOLS = [
     {
         "name": "get_technicals",
         "description": "Price trend: 50/200-day moving averages, returns over 1m/3m/6m/1y, 1-year volatility, maximum "
-                       "drawdown, 52-week range and beta against the Nifty 50 (S&P 500 for US stocks).",
+                       "drawdown, 52-week range, beta against the Nifty 50 (S&P 500 for US stocks), and daily "
+                       "indicators with plain readings: EMA 20/50/200, SMA 50/200, RSI, MACD, Bollinger Bands, "
+                       "Supertrend, ADX, Stochastic, ATR and OBV.",
         "input_schema": {"type": "object", "properties": {"symbol": SYMBOL}, "required": ["symbol"]},
     },
     {
@@ -432,8 +434,20 @@ def _technicals(args, sources: Sources):
         "indicators": {"source": eng, **technicals.summarize(history, "$" if sec.is_us(symbol) else "₹"),
                        **technicals.period_returns(history),
                        "beta_1y": risk.get("beta"), "beta_against": index_name if risk.get("beta") is not None else None},
+        **_indicator_readings(symbol, sources),
         "note": "Describes past price behaviour; it does not predict future prices.",
     }
+
+
+def _indicator_readings(symbol: str, sources: Sources) -> dict:
+    from app import technical_view   # local import: technical_view imports candles, which imports yfinance lazily
+    try:
+        view = technical_view.build(symbol, "daily")
+    except Exception:
+        return {}
+    sid = sources.add("FinSight indicators", None, f"{symbol}: daily technical indicators", view["bars"][-1][0])
+    return {"daily_indicators": {"source": sid, "as_of": view["bars"][-1][0],
+                           "readings": [{k: r[k] for k in ("name", "value", "reading")} for r in view["readings"]]}}
 
 
 def _portfolio_risk(args, sources: Sources):

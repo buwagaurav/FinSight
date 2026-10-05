@@ -40,9 +40,11 @@ def session_open(symbol: str, now: datetime | None = None) -> bool:
     return local.weekday() < 5 and start <= local.time() <= end
 
 
-def _fetch(symbol: str, period: str, interval: str) -> list[list]:
-    """[[label, open, high, low, close, volume, epoch_ms], ...] in the exchange's local time."""
-    hist = yf.Ticker(yahoo.yahoo_ticker(symbol)).history(period=period, interval=interval, auto_adjust=False)
+def _fetch(symbol: str, period: str, interval: str, adjust: bool = False) -> list[list]:
+    """[[label, open, high, low, close, volume, epoch_ms], ...] in the exchange's local time. `adjust` scales past
+    prices for splits and dividends (for indicators that look back months or years; the price chart shows the
+    prices actually traded)."""
+    hist = yf.Ticker(yahoo.yahoo_ticker(symbol)).history(period=period, interval=interval, auto_adjust=adjust)
     fmt = "%d %b %H:%M" if interval.endswith("m") else "%d %b %Y"
     bars, gap = [], None
     for idx, row in hist.iterrows():
