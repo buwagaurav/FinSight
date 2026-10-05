@@ -7,7 +7,7 @@ Matches TradingView's defaults so the numbers agree with what traders see there:
 - standard settings, including TradingView's Stochastic (14, 1, 3).
 Readings describe what an indicator shows now; they are not buy or sell signals.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app import candles
 from app.analytics import indicators as I
@@ -20,6 +20,10 @@ TIMEFRAMES = {
     "weekly": ("max", "1wk", 260, False, 3600, "week"),
     "intraday": ("60d", "5m", 375, False, 120, "bar"),   # 5-minute bars: ~75 a day, so 5 days are shown
 }
+# While the market is open, the page re-asks this often and the server keeps fetched bars at most this long, so
+# today's bar and every indicator move with the market (Yahoo itself is ~1-2 minutes behind). One Yahoo request per
+# stock per period, however many people are watching.
+LIVE_SECONDS = {"intraday": 60, "daily": 180, "weekly": 900}
 
 
 def _r(v, digits=2):
@@ -41,6 +45,9 @@ def _cross(a: list, b: list, within: int) -> int | None:
 def build(symbol: str, timeframe: str = "daily") -> dict:
     symbol = yahoo.normalize_symbol(symbol)
     period, interval, shown, adjust, ttl, noun = TIMEFRAMES[timeframe]
+    is_open = candles.session_open(symbol)
+    if is_open:
+        ttl = LIVE_SECONDS[timeframe]
     bars = cached(("indicator-bars", symbol, timeframe), ttl, lambda: candles._fetch(symbol, period, interval, adjust))
     if len(bars) < 30:
         raise LookupError(symbol)
@@ -74,6 +81,9 @@ def build(symbol: str, timeframe: str = "daily") -> dict:
         "symbol": symbol, "timeframe": timeframe, "interval": interval, "bar": noun,
         "bars": bars[start:], "series": out_series,
         "readings": readings(c, v, series, sym, noun, long_term=timeframe != "intraday"),
+        "market": {"id": candles.market(symbol), "open": is_open,
+                   "last_bar": datetime.fromtimestamp(ts[-1] / 1000, timezone.utc).isoformat()},
+        "refresh_seconds": LIVE_SECONDS[timeframe] if is_open else None,
         "source": {"name": "Yahoo Finance chart data", "url": f"https://finance.yahoo.com/quote/{yahoo.yahoo_ticker(symbol)}/chart"},
         "note": "Indicators describe past price and volume behaviour. They are not buy or sell signals and don't "
                 "predict prices. Settings and price adjustment (splits, not dividends) match TradingView's defaults; "

@@ -49,6 +49,21 @@ function Panel({ title, term, height = 170, label, build }: {
   );
 }
 
+function LiveStatus({ data }: { data: IndicatorView }) {
+  const us = data.market.id === "US";
+  const when = data.timeframe === "intraday"   // in the exchange's own time, whatever the reader's time zone
+    ? `${new Date(data.market.last_bar).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: us ? "America/New_York" : "Asia/Kolkata" })} ${us ? "ET" : "IST"}`
+    : data.bars.at(-1)?.[0];
+  return data.refresh_seconds ? (
+    <span className="ml-2 inline-flex items-center gap-1.5 text-xs font-normal text-good">
+      <span className="relative flex h-2 w-2" aria-hidden><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-good opacity-60" /><span className="relative inline-flex h-2 w-2 rounded-full bg-good" /></span>
+      Live · updates every {data.refresh_seconds >= 120 ? `${Math.round(data.refresh_seconds / 60)} min` : "minute"} · last bar {when}
+    </span>
+  ) : (
+    <span className="ml-2 text-xs font-normal text-muted">Market closed · last bar {when}</span>
+  );
+}
+
 export default function Technicals({ symbol }: { symbol: string }) {
   const cur = useCurrency();
   const [timeframe, setTimeframe] = useState<Timeframe>("daily");
@@ -56,12 +71,35 @@ export default function Technicals({ symbol }: { symbol: string }) {
   const [error, setError] = useState<string | null>(null);
   const [on, setOn] = useState<Set<string>>(new Set(["ema20", "ema50", "supertrend"]));
 
+  // While the market is open the server says how often to re-ask (intraday every minute), so today's bar, every
+  // indicator and every reading move with the market. Paused while the browser tab is hidden.
   useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let wake: (() => void) | undefined;
     setData(null);
     setError(null);
-    api<IndicatorView>(`/api/company/${encodeURIComponent(symbol)}/indicators?timeframe=${timeframe}`, undefined, { cache: 300 })
-      .then(setData)
-      .catch((e: Error) => setError(e.message));
+    const path = `/api/company/${encodeURIComponent(symbol)}/indicators?timeframe=${timeframe}`;
+    const load = (fresh: boolean) =>
+      api<IndicatorView>(path, undefined, fresh ? undefined : { cache: 60 })
+        .then((d) => {
+          if (cancelled) return;
+          setData(d);
+          setError(null);
+          if (d.refresh_seconds) timer = setTimeout(tick, d.refresh_seconds * 1000);
+        })
+        .catch((e: Error) => { if (!cancelled) setError(e.message); });
+    const tick = () => {
+      if (!document.hidden) return load(true);
+      wake = () => { if (!document.hidden) { document.removeEventListener("visibilitychange", wake!); load(true); } };
+      document.addEventListener("visibilitychange", wake);
+    };
+    load(false);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      if (wake) document.removeEventListener("visibilitychange", wake);
+    };
   }, [symbol, timeframe]);
 
   const toggle = (key: string) => setOn((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
@@ -74,7 +112,7 @@ export default function Technicals({ symbol }: { symbol: string }) {
 
   return (
     <div className="space-y-4">
-      <Card title="Technical indicators"
+      <Card title={<>Technical indicators{data && <LiveStatus data={data} />}</>}
         action={
           <div role="tablist" aria-label="Timeframe" className="flex flex-wrap gap-1 bg-surface-2 rounded-lg p-0.5">
             {TIMEFRAMES.map((t) => (

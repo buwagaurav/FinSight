@@ -81,3 +81,12 @@ def test_technicals_view_and_api(fake_bars):
     c = TestClient(main.app)
     assert c.get("/api/company/TCS/indicators", params={"timeframe": "weekly"}).json()["timeframe"] == "weekly"
     assert c.get("/api/company/TCS/indicators", params={"timeframe": "hourly"}).status_code == 422
+
+
+def test_refreshes_only_while_the_market_is_open(fake_bars, monkeypatch):
+    monkeypatch.setattr(candles, "session_open", lambda symbol, now=None: True)
+    assert technical_view.build("TCS", "intraday")["refresh_seconds"] == 60
+    assert technical_view.build("TCS", "daily")["refresh_seconds"] == 180
+    monkeypatch.setattr(candles, "session_open", lambda symbol, now=None: False)
+    view = technical_view.build("TCS", "weekly")
+    assert view["refresh_seconds"] is None and view["market"]["open"] is False

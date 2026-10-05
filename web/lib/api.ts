@@ -347,5 +347,7 @@ export type IndicatorView = {
   bars: [string, number, number, number, number, number, number][];   // label, open, high, low, close, volume, ms
   series: Record<string, (number | null)[]>;
   readings: IndicatorReading[];
+  market: { id: "IN" | "US"; open: boolean; last_bar: string };
+  refresh_seconds: number | null;   // set while the market is open: re-ask this often
   source: Source; note: string;
 };
