@@ -176,3 +176,15 @@ def test_remote_databases_always_use_tls():
     assert "sslmode=require" in require_tls("postgresql://u:p@ep-x.neon.tech/db?sslmode=disable")
     assert "sslmode=verify-full" in require_tls("postgresql://u:p@ep-x.neon.tech/db?sslmode=verify-full")
     assert require_tls("postgresql://u:p@localhost/db") == "postgresql://u:p@localhost/db"
+
+
+# ---------------------------------------------------------------- unbounded input (DoS)
+
+def test_list_and_query_inputs_are_bounded(client):
+    me = {"authorization": token()}
+    assert client.post("/api/screener", json={"filters": [{"field": "pe", "op": ">", "value": 1}] * 5000}).status_code == 422
+    assert client.post("/api/screener", json={"sectors": ["Technology"] * 50}).status_code == 422
+    big_history = {"question": "hello there", "history": [{"role": "user", "content": "x"}] * 2000}
+    assert client.post("/api/ask", json=big_history, headers=me).status_code == 422
+    assert client.get("/api/search", params={"q": "x" * 200}).status_code == 422
+    assert client.patch("/api/watchlist/<script>", json={"note": "x"}, headers=me).status_code == 422

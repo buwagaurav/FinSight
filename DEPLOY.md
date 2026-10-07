@@ -89,3 +89,8 @@ If you rename the Netlify site, redeploy and update both Google URLs and `FINSIG
   symbols; API and website responses carry security headers (the website's Content-Security-Policy limits scripts,
   connections, frames and form posts to the site, the API and Google sign-in). Dependency scans: `npm audit` in
   `web/`, and `pip-audit` for `backend/requirements.txt`.
+- **Penetration probe**: `cd backend && python -m security.pentest` runs a black-box security probe against a
+  running instance (default localhost) — injection, broken auth, object-level authorization (IDOR), SSRF, reflected
+  XSS, unbounded-input DoS, security headers, information leakage, rate limiting and CORS. Point it at any instance
+  you own with `--api`/`--web`; it exits non-zero on a failure, so it can gate CI. Set `FINSIGHT_API_JWT_SECRET` so
+  it can mint test tokens for the authenticated checks.

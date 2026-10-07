@@ -111,7 +111,7 @@ def loader_status():
 
 
 @app.get("/api/search")
-def search(q: str = Query(min_length=1)):
+def search(q: str = Query(min_length=1, max_length=80)):
     return yahoo.search(q)
 
 
@@ -235,8 +235,9 @@ def ipo(symbol: str):
 
 
 @app.get("/api/funds")
-def funds_search(q: str = Query("", max_length=100), group: str | None = None, category: str | None = None,
-                 house: str | None = None, plan: Literal["Direct", "Regular"] | None = None,
+def funds_search(q: str = Query("", max_length=100), group: str | None = Query(None, max_length=80),
+                 category: str | None = Query(None, max_length=80), house: str | None = Query(None, max_length=80),
+                 plan: Literal["Direct", "Regular"] | None = None,
                  option: Literal["Growth", "IDCW", "Other"] | None = None, include_inactive: bool = False,
                  offset: int = Query(0, ge=0), limit: int = Query(funds.PAGE, ge=1, le=200)):
     try:
@@ -288,8 +289,8 @@ class Filter(BaseModel):
 
 class ScreenRequest(BaseModel):
     market: Literal["IN", "US"] = "IN"
-    filters: list[Filter] = []
-    sectors: list[Literal[tuple(screener.SECTORS)]] = []  # type: ignore[valid-type]
+    filters: list[Filter] = Field(default=[], max_length=20)      # the engine whitelists each field; this caps the query size
+    sectors: list[Literal[tuple(screener.SECTORS)]] = Field(default=[], max_length=len(screener.SECTORS))  # type: ignore[valid-type]
     sort: str | None = "market_cap_cr"
     descending: bool = True
 
@@ -339,7 +340,7 @@ class ChatTurn(BaseModel):
 class AskRequest(BaseModel):
     question: str = Field(min_length=3, max_length=2000)
     symbol: str | None = None
-    history: list[ChatTurn] = []
+    history: list[ChatTurn] = Field(default=[], max_length=20)   # only the last two exchanges are used; cap the rest
     state: dict | None = None   # returned with the previous answer; see app/ai/conversation.py
 
     @field_validator("state")
@@ -407,7 +408,7 @@ def latest_report(symbol: str):
 
 
 class WatchRequest(BaseModel):
-    symbol: str = Field(min_length=1, max_length=40)
+    symbol: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9&.\-]+$")
     note: str | None = Field(default=None, max_length=200)
 
 
